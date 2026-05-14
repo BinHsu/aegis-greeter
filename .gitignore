@@ -1,0 +1,33 @@
+# Local working files (operating notes, drafts, personal backlog — never committed)
+CLAUDE.md
+backlog.md
+_context/
+
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/greeter
+/bin/
+vendor/
+
+# Container build artifacts
+*.tar
+*.tar.gz
+
+# AWS / secrets (defense-in-depth — app repo shouldn't have these, but never let one slip)
+.env
+.env.*
+*.pem
+*.key
+.aws/
+credentials
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

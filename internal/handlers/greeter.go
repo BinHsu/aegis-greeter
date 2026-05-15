@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,11 +12,22 @@ import (
 // silently — see ADR AG-0003.
 const MaxNameLen = 256
 
-// Greeter answers GET / with "Hello, <addressee>! I'm <hostname>", where
-// addressee is the ?name= query parameter when present and the caller IP
-// otherwise (preserves the baseline behavior of curl / with no params).
+// ResponseRecorder is the metric sink the Greeter calls after each
+// successful response. The handlers package depends on this interface,
+// not on the metrics package directly — decoupling lets unit tests
+// construct a Greeter without dragging the OTel SDK in.
+type ResponseRecorder interface {
+	RecordResponse(ctx context.Context, personalized bool)
+}
+
+// Greeter answers GET / with "Hello, <addressee>! I'm <hostname>",
+// where addressee is the ?name= query parameter when present and the
+// caller IP otherwise. Recorder may be nil, in which case the metric
+// emission is skipped — useful in tests and in degraded telemetry
+// configurations.
 type Greeter struct {
 	Hostname string
+	Recorder ResponseRecorder
 }
 
 // ServeHTTP implements http.Handler.
@@ -26,12 +38,17 @@ func (g *Greeter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	personalized := name != ""
 	addressee := name
-	if addressee == "" {
+	if !personalized {
 		addressee = GetIPFromRequest(r)
 	}
 
 	fmt.Fprintf(w, "Hello, %s! I'm %s\n", addressee, g.Hostname)
+
+	if g.Recorder != nil {
+		g.Recorder.RecordResponse(r.Context(), personalized)
+	}
 }
 
 // GetIPFromRequest extracts the caller IP. When X-Forwarded-For is present

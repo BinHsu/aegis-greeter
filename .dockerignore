@@ -1,0 +1,31 @@
+# Local operating notes — gitignored already, but excluding from the
+# docker build context too means the host's working copy of these
+# files never leaks into a build cache layer.
+CLAUDE.md
+backlog.md
+_context/
+
+# Project-local toolchain output and caches.
+bin/
+
+# VCS + CI metadata. The Dockerfile only needs Go source + go.mod/sum.
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# IDE / OS noise.
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code settings dir.
+.claude/
+
+# Test artifacts.
+coverage.out
+test-results/
+
+# Backup / swap files.
+*~
+*.swp

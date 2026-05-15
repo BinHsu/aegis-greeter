@@ -88,24 +88,27 @@ jobs:
       - name: Commit image tag back to infra repo
         env:
           INFRA_REPO_PAT: ${{ secrets.INFRA_REPO_PAT }}
+          ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
         run: |
           set -euo pipefail
-          # Clone the sibling infra repo with a fine-grained PAT scoped
-          # to contents:write on aegis-stateless only.
-          git clone --depth 1 \
+          # Full clone (not shallow) of the sibling infra repo, with a
+          # fine-grained PAT scoped to contents:write on aegis-stateless
+          # only — full history is needed to rebase before pushing.
+          git clone \
             "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-stateless.git" \
             infra
           cd infra
 
-          # ArgoCD reconciles k8s/overlays/prod. Pin the image to the
-          # immutable short-SHA tag. yq is preinstalled on ubuntu
-          # runners — no curl|bash, no extra tool install.
-          # NOTE: this assumes the sibling kustomization images[] entry
-          # is { name: aegis-greeter, newTag: <tag> }. Confirm against
-          # the sibling layout when the PAT + vars are first wired.
-          yq -i \
-            '(.images[] | select(.name == "aegis-greeter") | .newTag) = strenv(IMAGE_TAG)' \
-            k8s/overlays/prod/kustomization.yaml
+          # ArgoCD reconciles k8s/overlays/prod. The kustomization
+          # images[] entry ships placeholder newName/newTag — the real
+          # ECR URL embeds the AWS account ID and cannot be committed to
+          # the infra repo — so CI sets BOTH fields. yq is preinstalled
+          # on ubuntu runners (no curl|bash, no extra tool install).
+          # Contract confirmed in aegis-stateless#9.
+          yq -i '
+            (.images[] | select(.name == "aegis-greeter") | .newName) = strenv(ECR_REPO_URL) |
+            (.images[] | select(.name == "aegis-greeter") | .newTag)  = strenv(IMAGE_TAG)
+          ' k8s/overlays/prod/kustomization.yaml
 
           git config user.name "BinHsu"
           git config user.email "10249382+BinHsu@users.noreply.github.com"
@@ -115,4 +118,8 @@ jobs:
             exit 0
           fi
           git commit -m "Bump aegis-greeter image to ${IMAGE_TAG}"
-          git push
+          # Rebase onto any commits that landed since the clone so the
+          # bump lands as a single linear commit — aegis-stateless
+          # requires linear history on main.
+          git pull --rebase origin main
+          git push origin main

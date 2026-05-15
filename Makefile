@@ -5,7 +5,8 @@ GOBIN := $(CURDIR)/bin
 PATH  := $(GOBIN):$(PATH)
 export GOBIN PATH
 
-.PHONY: dev-setup tidy vet test lint vuln build image hadolint clean
+.PHONY: dev-setup tidy vet test lint vuln build image hadolint actionlint \
+        precommit prepush hooks-install clean
 
 # Container image identity. IMAGE_TAG defaults to the 7-char git short
 # SHA so locally-built images are traceable to a commit. VERSION and
@@ -56,6 +57,31 @@ image:
 
 hadolint:
 	docker run --rm -i $(HADOLINT_IMAGE) < Dockerfile
+
+actionlint: dev-setup
+	$(GOBIN)/actionlint
+
+# precommit — fast local gate (pre-commit hook target). gofmt + vet +
+# build only, finishes in seconds.
+precommit:
+	@unformatted=$$(gofmt -l .); \
+	  if [ -n "$$unformatted" ]; then \
+	    echo "FAIL gofmt — run 'gofmt -w .' on:"; echo "$$unformatted"; \
+	    exit 1; \
+	  fi
+	go vet ./...
+	go build ./...
+
+# prepush — comprehensive local gate (pre-push hook target). Reuses the
+# same targets CI runs so "passes locally" predicts "passes CI".
+prepush: precommit test lint vuln actionlint hadolint
+	@echo "prepush gate clean — safe to push"
+
+# hooks-install — point git at the committed .githooks directory. Run
+# once per clone. Idempotent.
+hooks-install:
+	git config core.hooksPath .githooks
+	@echo "git hooks active: core.hooksPath -> .githooks"
 
 clean:
 	rm -rf ./bin

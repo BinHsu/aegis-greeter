@@ -1,0 +1,11 @@
+#!/bin/sh
+# aegis-greeter pre-push hook — comprehensive local gate.
+#
+# Runs the full local suite: gofmt + vet + build (via precommit) then
+# go test -race, golangci-lint, govulncheck, actionlint, and hadolint.
+# This is the last gate before code leaves the machine; CI repeats it
+# and adds the container build + trivy scan + CodeQL.
+#
+# Bypass with `git push --no-verify` only when you understand why.
+
+exec make prepush

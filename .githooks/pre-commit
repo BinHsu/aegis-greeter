@@ -1,0 +1,12 @@
+#!/bin/sh
+# aegis-greeter pre-commit hook — fast local gate.
+#
+# Runs gofmt + go vet + go build only: syntax and compile checks that
+# finish in a few seconds, so there is no temptation to --no-verify.
+# Heavier checks (go test -race, golangci-lint, govulncheck, actionlint,
+# hadolint) run in the pre-push hook; container build + trivy + CodeQL
+# run in CI. See the DevSecOps layering in README.
+#
+# Bypass with `git commit --no-verify` only when you understand why.
+
+exec make precommit

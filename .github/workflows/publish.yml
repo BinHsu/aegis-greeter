@@ -1,0 +1,118 @@
+name: Publish
+
+# Builds the production image, pushes it to ECR, and commits the new
+# image tag back to the sibling infra repo (aegis-stateless). ArgoCD in
+# the cluster reconciles from there — this workflow never touches the
+# cluster directly. That is the GitOps invariant.
+#
+# Inert until configured: the job is gated on vars.ECR_REPO_URL, so a
+# fresh clone with no AWS/PAT wiring shows this workflow as skipped, not
+# failed. Required configuration before it activates:
+#   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
+#   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
+#                     aegis-stateless contents:write, with an expiry)
+# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of the sibling's
+# platform/ environment.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write # mint the OIDC token for AWS role assumption
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false # never abort a half-completed push
+
+jobs:
+  publish:
+    if: vars.ECR_REPO_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      # CI already ran the full gate on this commit — branch protection
+      # requires it before merge. Re-run the fast checks only, as a
+      # cheap tripwire against a misconfigured branch protection rule.
+      - name: Sanity gate (vet + test)
+        run: make vet test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          role-to-assume: ${{ vars.OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${{ vars.ECR_REGISTRY }}"
+
+      - name: Resolve image tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg VERSION="${IMAGE_TAG}" \
+            --build-arg COMMIT="${GITHUB_SHA}" \
+            --tag "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}" \
+            --tag "${{ vars.ECR_REPO_URL }}:latest" \
+            --load \
+            .
+
+      - name: Trivy scan the release image (HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ vars.ECR_REPO_URL }}:${{ env.IMAGE_TAG }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Push image to ECR
+        run: |
+          docker push "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}"
+          docker push "${{ vars.ECR_REPO_URL }}:latest"
+
+      - name: Commit image tag back to infra repo
+        env:
+          INFRA_REPO_PAT: ${{ secrets.INFRA_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          # Clone the sibling infra repo with a fine-grained PAT scoped
+          # to contents:write on aegis-stateless only.
+          git clone --depth 1 \
+            "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-stateless.git" \
+            infra
+          cd infra
+
+          # ArgoCD reconciles k8s/overlays/prod. Pin the image to the
+          # immutable short-SHA tag. yq is preinstalled on ubuntu
+          # runners — no curl|bash, no extra tool install.
+          # NOTE: this assumes the sibling kustomization images[] entry
+          # is { name: aegis-greeter, newTag: <tag> }. Confirm against
+          # the sibling layout when the PAT + vars are first wired.
+          yq -i \
+            '(.images[] | select(.name == "aegis-greeter") | .newTag) = strenv(IMAGE_TAG)' \
+            k8s/overlays/prod/kustomization.yaml
+
+          git config user.name "BinHsu"
+          git config user.email "10249382+BinHsu@users.noreply.github.com"
+          git add k8s/overlays/prod/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "image tag unchanged — nothing to commit"
+            exit 0
+          fi
+          git commit -m "Bump aegis-greeter image to ${IMAGE_TAG}"
+          git push

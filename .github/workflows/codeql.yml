@@ -1,0 +1,46 @@
+name: CodeQL
+
+# Static application security testing. Covers logic flaws that the
+# dependency-level scanners (govulncheck, Trivy, dependency-review)
+# cannot see — tainted data flow, injection, unsafe constructs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly re-scan catches newly-published query updates against
+    # unchanged code. Mondays 04:23 UTC.
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4
+        with:
+          languages: go
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@bc0b696b4103f5fe60f15749af68a046868d511a # codeql-bundle-v2.25.4

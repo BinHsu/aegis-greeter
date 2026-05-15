@@ -99,7 +99,7 @@ cheaper it is to fix:
 | `pre-commit` hook | every `git commit` | `gofmt`, `go vet`, `go build` |
 | `pre-push` hook | every `git push` | the above + `go test -race`, `golangci-lint`, `govulncheck`, `actionlint`, `hadolint` |
 | GitHub Actions `ci.yml` | every PR and push | the full pre-push suite + container build + Trivy image scan |
-| GitHub Actions `codeql.yml` | push, PR, weekly | CodeQL static analysis |
+| GitHub Actions `codeql.yml` | push, PR | CodeQL static analysis (runs once the repo is public — see CI/CD) |
 | GitHub Actions `dependency-review.yml` | every PR | blocks PRs adding HIGH+ vulnerable dependencies |
 
 Local hooks and CI run the *same* `make` targets, so "passes locally"
@@ -111,7 +111,7 @@ genuinely predicts "passes CI". Run the full local gate by hand with
 | Workflow | Runs on | Does |
 |---|---|---|
 | `ci.yml` | PR, push | Verification gate; secrets-free, expected always green. |
-| `codeql.yml` | push, PR, schedule | SAST. |
+| `codeql.yml` | push, PR | SAST. Code scanning needs a public repo or GitHub Advanced Security, so the job skips cleanly while the repo is private and activates when it goes public. |
 | `dependency-review.yml` | PR | Dependency-diff vulnerability gate. |
 | `publish.yml` | push to `main` | Build → push to ECR over OIDC → commit the image tag back to the sibling repo. |
 

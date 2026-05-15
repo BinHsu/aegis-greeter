@@ -3,18 +3,19 @@ name: CodeQL
 # Static application security testing. Covers logic flaws that the
 # dependency-level scanners (govulncheck, Trivy, dependency-review)
 # cannot see — tainted data flow, injection, unsafe constructs.
+#
+# Runs on push and PR. The analyze job is gated on repository
+# visibility: code scanning needs a public repo or GitHub Advanced
+# Security, so while this repo is private the job skips cleanly.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    # Weekly re-scan catches newly-published query updates against
-    # unchanged code. Mondays 04:23 UTC.
-    - cron: '23 4 * * 1'
 
 permissions:
+  actions: read # codeql-action reads workflow-run metadata (private-repo requirement)
   contents: read
   security-events: write
 
@@ -24,6 +25,12 @@ concurrency:
 
 jobs:
   analyze:
+    # CodeQL code scanning requires a public repository or GitHub
+    # Advanced Security. While this repo is private the job skips
+    # cleanly — the run shows as skipped, not failed — and activates
+    # automatically once the repo is made public for portfolio
+    # circulation. Mirrors the vars-gated pattern in publish.yml.
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

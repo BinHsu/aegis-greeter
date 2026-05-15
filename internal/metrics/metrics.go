@@ -17,11 +17,10 @@ type Instruments struct {
 
 // New constructs the custom instruments against the supplied Meter.
 // The build_info Gauge is observable: it reports 1 at every collection
-// interval with version, commit, and image_sha as labels — Prometheus
-// "info" metric convention. The version, commit, and imageSHA values
-// are captured at startup and assumed not to change for the lifetime
-// of the process.
-func New(meter metric.Meter, version, commit, imageSHA string) (*Instruments, error) {
+// interval with version and commit as labels — the Prometheus "info"
+// metric convention. version and commit are baked into the binary at
+// build time via -ldflags and do not change for the process lifetime.
+func New(meter metric.Meter, version, commit string) (*Instruments, error) {
 	responses, err := meter.Int64Counter(
 		"greeter_responses_total",
 		metric.WithDescription("Total greetings sent, labeled by personalization state."),
@@ -32,12 +31,11 @@ func New(meter metric.Meter, version, commit, imageSHA string) (*Instruments, er
 
 	_, err = meter.Int64ObservableGauge(
 		"greeter_build_info",
-		metric.WithDescription("Build identity gauge — always 1, labels carry version/commit/image_sha."),
+		metric.WithDescription("Build identity gauge — always 1, labels carry version/commit."),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 			o.Observe(1, metric.WithAttributes(
 				attribute.String("version", version),
 				attribute.String("commit", commit),
-				attribute.String("image_sha", imageSHA),
 			))
 			return nil
 		}),

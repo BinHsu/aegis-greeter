@@ -132,7 +132,6 @@ All configuration is environment variables; there is no config file.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP gRPC endpoint; empty disables trace/metric export. |
 | `PYROSCOPE_ENDPOINT` | — | Pyroscope endpoint; empty disables profiling. |
 | `POD_NAME`, `NODE_NAME` | — | Downward API values; surfaced as `pod` / `node` log fields. |
-| `IMAGE_SHA` | — | Image digest; surfaced as a `greeter_build_info` label. |
 
 ## Decisions
 

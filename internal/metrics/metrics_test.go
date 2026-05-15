@@ -35,7 +35,7 @@ func TestRecordResponse_PersonalizedLabel_BVA(t *testing.T) {
 			mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
 
-			ins, err := metrics.New(mp.Meter("test"), "v", "c", "s")
+			ins, err := metrics.New(mp.Meter("test"), "v", "c")
 			if err != nil {
 				t.Fatalf("metrics.New: %v", err)
 			}
@@ -64,7 +64,7 @@ func TestBuildInfo_AlwaysOne(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
 
-	if _, err := metrics.New(mp.Meter("test"), "v1.2.3", "abcdef0", "sha256:cafe"); err != nil {
+	if _, err := metrics.New(mp.Meter("test"), "v1.2.3", "abcdef0"); err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}
 
@@ -80,7 +80,6 @@ func TestBuildInfo_AlwaysOne(t *testing.T) {
 	for _, want := range []struct{ key, val string }{
 		{"version", "v1.2.3"},
 		{"commit", "abcdef0"},
-		{"image_sha", "sha256:cafe"},
 	} {
 		got, ok := attrs[want.key]
 		if !ok {

@@ -70,7 +70,6 @@ func main() {
 	serviceName := envOrDefault("OTEL_SERVICE_NAME", defaultServiceName)
 	pod := os.Getenv("POD_NAME")
 	node := os.Getenv("NODE_NAME")
-	imageSHA := os.Getenv("IMAGE_SHA")
 
 	// Phase 2: OTel providers.
 	ctx := context.Background()
@@ -105,7 +104,7 @@ func main() {
 	}
 
 	// Phase 5: custom metric instruments.
-	instruments, err := metrics.New(providers.Meter.Meter(serviceName), Version, Commit, imageSHA)
+	instruments, err := metrics.New(providers.Meter.Meter(serviceName), Version, Commit)
 	if err != nil {
 		slog.Error("metrics init failed", "err", err)
 		os.Exit(1)

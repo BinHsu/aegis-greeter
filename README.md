@@ -66,7 +66,7 @@ stateDiagram-v2
 On `SIGTERM` the order is fixed: flip `/readyz` to 503, drain in-flight
 requests via `http.Server.Shutdown`, flush the OpenTelemetry providers,
 exit 0. A request still running past the 25-second grace period is
-abandoned so shutdown cannot hang. See ADR-0004.
+abandoned so shutdown cannot hang. See AG-02.
 
 ## Architecture
 
@@ -201,7 +201,7 @@ defect; each is a constraint of the current environment.
   on the first push after the repo goes public.
 - **A stale `latest` image tag exists in ECR.** An early publish run
   pushed `latest` before the tag strategy settled on SHA-only
-  (ADR-0007). The ECR repository is immutable, so that tag is frozen
+  (AG-03). The ECR repository is immutable, so that tag is frozen
   at an old digest. It is harmless — ArgoCD deploys the SHA tag — and
   is left for infra-side cleanup.
 
@@ -211,11 +211,11 @@ The greeter logic is trivial and not the point. What is reusable is the
 scaffolding around it:
 
 - the project-local Go toolchain — `tools.go` + `Makefile` + `GOBIN`
-  (ADR-0001);
-- the multi-stage, digest-pinned, distroless `Dockerfile` (ADR-0005);
+  (AG-01);
+- the multi-stage, digest-pinned, distroless `Dockerfile` (AG-03);
 - the layered quality gates — git hooks plus the GitHub Actions
   workflows in `.github/workflows/`;
-- the `cmd/` + `internal/` layout (ADR-0010);
+- the `cmd/` + `internal/` layout (AG-01);
 - the OpenTelemetry + Pyroscope wiring in `internal/telemetry`.
 
 To adapt it: change the module path in `go.mod` (and the matching
@@ -225,11 +225,11 @@ Dockerfile, the CI, and the layout carry over unchanged.
 
 ## Decisions
 
-Architecture decision records live in [`docs/adr/`](docs/adr/) — eleven
-records covering the toolchain, the logging stack, the container base,
-the CI mechanics, and the boundary-value choices. Each states the
-context, the decision, the consequences, the alternatives considered,
-and what is out of scope with the trigger to revisit it.
+Architecture decision records live in [`docs/adr/`](docs/adr/) — four
+thematic records (toolchain & layout, HTTP service design, container &
+delivery, observability). Each states the context, the decisions, the
+consequences, the alternatives considered, and what is out of scope
+with the trigger to revisit it.
 
 ## License
 

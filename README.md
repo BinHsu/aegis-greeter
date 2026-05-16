@@ -13,6 +13,16 @@ code, a minimal-surface container, layered quality gates, and a CI
 pipeline that builds images and hands off to GitOps without ever
 touching the cluster.
 
+## Who is this for
+
+| You want to… | Start here |
+|---|---|
+| Run it in 30 seconds | [Run it locally](#run-it-locally) |
+| Understand the design | [Architecture](#architecture) + the [ADRs](docs/adr/) |
+| Review the engineering | [Quality gates](#quality-gates) + [CI/CD](#cicd) |
+| See what is deferred, and why | [Known limitations](#known-limitations) |
+| Lift it as a starting point | [Reusing this as a template](#reusing-this-as-a-template) |
+
 ## What it does
 
 `GET /` answers `Hello, <name>! I'm <hostname>`. The `name` comes from
@@ -24,6 +34,39 @@ caller IP (read from `X-Forwarded-For` when present, else `RemoteAddr`).
 | `GET /?name=<value>` | Greeter | 200 with the greeting. `name` is capped at 256 bytes; longer → 400. |
 | `GET /healthz` | Liveness probe | Always 200 once the process is up. |
 | `GET /readyz` | Readiness probe | 200 once the listener is bound; 503 before that and after `SIGTERM` so the pod drains before termination. |
+
+## Lifecycle
+
+`/readyz` is *drain-aware*: it reports 503 both before the listener is
+bound and during shutdown, so an orchestrator routes traffic only while
+the service can actually serve it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Starting: process start
+    Starting --> Ready: listener bound
+    Ready --> Draining: SIGTERM / SIGINT
+    Draining --> Stopped: in-flight drained + providers flushed
+    Stopped --> [*]
+
+    note right of Starting
+        /healthz 200 · /readyz 503
+    end note
+    note right of Ready
+        /healthz 200 · /readyz 200
+        serving traffic
+    end note
+    note right of Draining
+        /readyz 503 (stops new routing)
+        in-flight requests finish
+        25s grace period
+    end note
+```
+
+On `SIGTERM` the order is fixed: flip `/readyz` to 503, drain in-flight
+requests via `http.Server.Shutdown`, flush the OpenTelemetry providers,
+exit 0. A request still running past the 25-second grace period is
+abandoned so shutdown cannot hang. See ADR-0004.
 
 ## Architecture
 
@@ -59,6 +102,29 @@ local Grafana Alloy DaemonSet:
 Every exporter is fail-soft: an empty or unreachable endpoint degrades
 that subsystem to a no-op and never blocks the request path.
 
+## Run it locally
+
+Build and run the binary directly:
+
+```sh
+make build                              # static binary → ./bin/greeter
+./bin/greeter &                         # listens on :8080
+curl 'localhost:8080/?name=Operator'    # → Hello, Operator! I'm <hostname>
+curl  localhost:8080/                   # no name → falls back to caller IP
+curl  localhost:8080/healthz            # → 200
+curl  localhost:8080/readyz             # → 200
+kill %1                                 # SIGTERM → graceful drain, exit 0
+```
+
+Or run the container — no host Go toolchain needed at all:
+
+```sh
+make image
+docker run --rm -p 8080:8080 -e HELLO_TAG=local aegis-greeter:latest
+```
+
+`LOG_LEVEL=DEBUG` makes the slog output verbose; see [Configuration](#configuration).
+
 ## Reviewer setup
 
 The project owns its toolchain. Nothing it installs lands in your
@@ -75,20 +141,6 @@ Your host Go version does not matter: `go.mod` declares a `toolchain`
 directive and `GOTOOLCHAIN=auto` (Go's default since 1.21) fetches the
 pinned compiler on demand.
 
-If you would rather not install Go at all, the container build is fully
-self-contained:
-
-```sh
-make image           # multi-stage docker build, no host Go needed
-```
-
-## Build
-
-```sh
-make build           # static binary → ./bin/greeter
-make image           # production container image (distroless, ~7 MB)
-```
-
 ## Quality gates
 
 Checks are layered shift-left — the earlier a defect is caught, the
@@ -99,7 +151,7 @@ cheaper it is to fix:
 | `pre-commit` hook | every `git commit` | `gofmt`, `go vet`, `go build` |
 | `pre-push` hook | every `git push` | the above + `go test -race`, `golangci-lint`, `govulncheck`, `actionlint`, `hadolint` |
 | GitHub Actions `ci.yml` | every PR and push | the full pre-push suite + container build + Trivy image scan |
-| GitHub Actions `codeql.yml` | push, PR | CodeQL static analysis (runs once the repo is public — see CI/CD) |
+| GitHub Actions `codeql.yml` | push, PR | CodeQL static analysis (see [Known limitations](#known-limitations)) |
 | GitHub Actions `dependency-review.yml` | every PR | blocks PRs adding HIGH+ vulnerable dependencies |
 
 Local hooks and CI run the *same* `make` targets, so "passes locally"
@@ -133,11 +185,51 @@ All configuration is environment variables; there is no config file.
 | `PYROSCOPE_ENDPOINT` | — | Pyroscope endpoint; empty disables profiling. |
 | `POD_NAME`, `NODE_NAME` | — | Downward API values; surfaced as `pod` / `node` log fields. |
 
+## Known limitations
+
+Honest accounting of what is deferred and why — none of these is a code
+defect; each is a constraint of the current environment.
+
+- **Branch protection is not enforced.** GitHub rulesets require a
+  public repository or a paid plan; on a private repo on the Free plan
+  the API returns 403. The intended ruleset (require the `verify` CI
+  check, linear history, block force-push) activates when the repo is
+  made public. Until then the CI gate is advisory, not blocking.
+- **CodeQL does not run while the repo is private.** Code scanning has
+  the same public-or-paid constraint. `codeql.yml` is committed and
+  gated on repository visibility — it skips cleanly now and activates
+  on the first push after the repo goes public.
+- **A stale `latest` image tag exists in ECR.** An early publish run
+  pushed `latest` before the tag strategy settled on SHA-only
+  (ADR-0007). The ECR repository is immutable, so that tag is frozen
+  at an old digest. It is harmless — ArgoCD deploys the SHA tag — and
+  is left for infra-side cleanup.
+
+## Reusing this as a template
+
+The greeter logic is trivial and not the point. What is reusable is the
+scaffolding around it:
+
+- the project-local Go toolchain — `tools.go` + `Makefile` + `GOBIN`
+  (ADR-0001);
+- the multi-stage, digest-pinned, distroless `Dockerfile` (ADR-0005);
+- the layered quality gates — git hooks plus the GitHub Actions
+  workflows in `.github/workflows/`;
+- the `cmd/` + `internal/` layout (ADR-0010);
+- the OpenTelemetry + Pyroscope wiring in `internal/telemetry`.
+
+To adapt it: change the module path in `go.mod` (and the matching
+import paths), replace the handler in `internal/handlers`, and re-point
+the ECR / cross-repo values used by `publish.yml`. The toolchain, the
+Dockerfile, the CI, and the layout carry over unchanged.
+
 ## Decisions
 
-Architecture decision records live in [`docs/adr/`](docs/adr/). They
-cover the toolchain, the logging stack, the container base, the CI
-mechanics, and the boundary-value choices.
+Architecture decision records live in [`docs/adr/`](docs/adr/) — eleven
+records covering the toolchain, the logging stack, the container base,
+the CI mechanics, and the boundary-value choices. Each states the
+context, the decision, the consequences, the alternatives considered,
+and what is out of scope with the trigger to revisit it.
 
 ## License
 

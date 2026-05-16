@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -57,8 +58,21 @@ var (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx); err != nil {
+		slog.Error("aegis-greeter exited with error", "err", err)
+		os.Exit(1)
+	}
+}
+
+// run wires the service and serves until ctx is cancelled (SIGINT /
+// SIGTERM) or the server fails, then drains gracefully. It is the
+// testable seam beneath main: a caller drives shutdown by cancelling
+// ctx instead of delivering a signal.
+func run(ctx context.Context) error {
 	// Phase 1: bootstrap logger — plain JSON, no trace context yet.
-	// Used for any error before OTel providers are up.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLogLevel()})))
 
 	hostname, err := os.Hostname()
@@ -72,29 +86,25 @@ func main() {
 	node := os.Getenv("NODE_NAME")
 
 	// Phase 2: OTel providers.
-	ctx := context.Background()
 	providers, err := telemetry.Init(ctx, telemetry.Config{
 		ServiceName:  serviceName,
 		OTLPEndpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		SamplerRatio: samplerRatio,
 	})
 	if err != nil {
-		slog.Error("telemetry init failed", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("telemetry init: %w", err)
 	}
 	otel.SetTracerProvider(providers.Tracer)
 	otel.SetMeterProvider(providers.Meter)
 
-	// Phase 3: swap to trace-context-aware logger now that the OTel
-	// providers exist. From here on, slog records emitted with a
-	// request ctx will carry trace_id + span_id.
+	// Phase 3: swap to the trace-context-aware logger.
 	slog.SetDefault(slog.New(telemetry.NewTraceContextHandler(
 		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLogLevel()}),
 		pod, node,
 	)))
 
 	// Phase 4: Pyroscope. Fail-soft — a missing profile pipeline must
-	// not block the request path.
+	// not block startup.
 	profiler, err := telemetry.StartProfiler(telemetry.ProfilerConfig{
 		ApplicationName: serviceName,
 		Endpoint:        os.Getenv("PYROSCOPE_ENDPOINT"),
@@ -106,8 +116,7 @@ func main() {
 	// Phase 5: custom metric instruments.
 	instruments, err := metrics.New(providers.Meter.Meter(serviceName), Version, Commit)
 	if err != nil {
-		slog.Error("metrics init failed", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("metrics init: %w", err)
 	}
 
 	slog.Info("starting aegis-greeter",
@@ -139,14 +148,38 @@ func main() {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		slog.Error("listen failed", "addr", addr, "err", err)
-		os.Exit(1)
+		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
+
+	return serve(ctx, srv, ln, readiness, shutdownDeadline, func(shutdownCtx context.Context) {
+		if err := providers.Shutdown(shutdownCtx); err != nil {
+			slog.Error("provider flush failed", "err", err)
+		}
+		if err := profiler.Stop(); err != nil {
+			slog.Warn("pyroscope stop failed", "err", err)
+		}
+	})
+}
+
+// serve runs srv on ln until ctx is cancelled or the server fails. On
+// ctx cancellation it drains: readiness flips to 503 (the orchestrator
+// stops routing), then http.Server.Shutdown lets in-flight requests
+// finish — refusing new connections — within gracePeriod. cleanup runs
+// after the HTTP drain (provider flush, profiler stop).
+//
+// serve returns nil on a clean drain, a wrapped error if the server
+// failed outright, or a wrapped error if the drain exceeded gracePeriod
+// (in-flight requests still running when the budget expired).
+func serve(
+	ctx context.Context,
+	srv *http.Server,
+	ln net.Listener,
+	readiness *handlers.Readiness,
+	gracePeriod time.Duration,
+	cleanup func(context.Context),
+) error {
 	readiness.SetReady(true)
 	slog.Info("listening", "addr", ln.Addr().String())
-
-	signalCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -157,31 +190,31 @@ func main() {
 	}()
 
 	select {
-	case <-signalCtx.Done():
+	case <-ctx.Done():
 		slog.Info("shutdown signal received")
 	case err := <-serveErr:
-		slog.Error("server error", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("server error: %w", err)
 	}
 
 	readiness.SetReady(false)
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracePeriod)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+	err := srv.Shutdown(shutdownCtx)
+	if cleanup != nil {
+		cleanup(shutdownCtx)
 	}
-	if err := providers.Shutdown(shutdownCtx); err != nil {
-		slog.Error("provider flush failed", "err", err)
-	}
-	if err := profiler.Stop(); err != nil {
-		slog.Warn("pyroscope stop failed", "err", err)
+	if err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
 	slog.Info("aegis-greeter stopped")
+	return nil
 }
 
+// parseLogLevel reads LOG_LEVEL (DEBUG / INFO / WARN / ERROR); INFO by
+// default.
 func parseLogLevel() slog.Level {
 	if raw := os.Getenv("LOG_LEVEL"); raw != "" {
 		var parsed slog.Level

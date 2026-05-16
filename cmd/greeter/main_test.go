@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -163,4 +164,30 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met within timeout")
+}
+
+// TestParseLogLevel covers LOG_LEVEL parsing: the four canonical
+// levels, an empty value (treated the same as unset → INFO), and an
+// unparseable value (falls back to INFO rather than erroring).
+func TestParseLogLevel(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want slog.Level
+	}{
+		{"empty / unset", "", slog.LevelInfo},
+		{"DEBUG", "DEBUG", slog.LevelDebug},
+		{"INFO", "INFO", slog.LevelInfo},
+		{"WARN", "WARN", slog.LevelWarn},
+		{"ERROR", "ERROR", slog.LevelError},
+		{"unparseable falls back to INFO", "loud", slog.LevelInfo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOG_LEVEL", tc.env)
+			if got := parseLogLevel(); got != tc.want {
+				t.Errorf("LOG_LEVEL=%q: got %v, want %v", tc.env, got, tc.want)
+			}
+		})
+	}
 }

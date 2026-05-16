@@ -95,3 +95,60 @@ func isAllZero(hex string) bool {
 	}
 	return true
 }
+
+// TestTraceContextHandler_WithAttrs confirms attributes added via slog's
+// With(...) do not displace the handler's pod / node injection. It is a
+// regression guard: if WithAttrs returned the bare inner handler
+// instead of re-wrapping, trace context would silently stop appearing
+// after any With() call.
+func TestTraceContextHandler_WithAttrs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	handler := telemetry.NewTraceContextHandler(
+		slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		"test-pod", "test-node",
+	)
+	logger := slog.New(handler).With("extra", "value")
+
+	logger.InfoContext(context.Background(), "with attrs")
+
+	fields := decode(t, buf.Bytes())
+	if fields["pod"] != "test-pod" {
+		t.Errorf("pod after With(): got %v, want test-pod", fields["pod"])
+	}
+	if fields["node"] != "test-node" {
+		t.Errorf("node after With(): got %v, want test-node", fields["node"])
+	}
+	if fields["extra"] != "value" {
+		t.Errorf("With() attr: got %v, want value", fields["extra"])
+	}
+}
+
+// TestTraceContextHandler_WithGroup confirms WithGroup keeps the wrapper
+// intact — pod / node are still injected. The application never groups
+// its logger, so this exercises slog.Handler interface completeness;
+// with a group active the injected attrs nest under the group name,
+// which is the expected slog behavior.
+func TestTraceContextHandler_WithGroup(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	handler := telemetry.NewTraceContextHandler(
+		slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		"test-pod", "test-node",
+	)
+	logger := slog.New(handler).WithGroup("grp")
+
+	logger.InfoContext(context.Background(), "with group")
+
+	fields := decode(t, buf.Bytes())
+	grp, ok := fields["grp"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a 'grp' group object, got %v", fields["grp"])
+	}
+	if grp["pod"] != "test-pod" {
+		t.Errorf("pod after WithGroup(): got %v, want test-pod", grp["pod"])
+	}
+	if grp["node"] != "test-node" {
+		t.Errorf("node after WithGroup(): got %v, want test-node", grp["node"])
+	}
+}

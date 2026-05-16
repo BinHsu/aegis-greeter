@@ -64,12 +64,14 @@ jobs:
 
       - name: Build image
         run: |
+          # SHA tag only. The ECR repo is IMMUTABLE, so a moving
+          # `latest` tag cannot be re-pushed — ArgoCD pins to the SHA
+          # tag regardless. See ADR AG-0007.
           docker buildx build \
             --platform linux/amd64 \
             --build-arg VERSION="${IMAGE_TAG}" \
             --build-arg COMMIT="${GITHUB_SHA}" \
             --tag "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}" \
-            --tag "${{ vars.ECR_REPO_URL }}:latest" \
             --load \
             .
 
@@ -81,9 +83,7 @@ jobs:
           exit-code: '1'
 
       - name: Push image to ECR
-        run: |
-          docker push "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}"
-          docker push "${{ vars.ECR_REPO_URL }}:latest"
+        run: docker push "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}"
 
       - name: Commit image tag back to infra repo
         env:

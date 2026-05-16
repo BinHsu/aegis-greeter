@@ -1,6 +1,6 @@
-# AG-0007: Image tag strategy — short SHA + latest
+# AG-0007: Image tag strategy — immutable short-SHA tag only
 
-- **Status**: Accepted
+- **Status**: Accepted (revised 2026-05-16)
 - **Date**: 2026-05-15
 
 ## Context
@@ -9,19 +9,35 @@ Each CI build produces a container image that needs a tag. The tag has
 to give a deterministic, traceable mapping from a running container
 back to the source commit it was built from.
 
+The ECR repository, provisioned by the sibling `aegis-stateless`
+`platform/` environment, is created with `image_tag_mutability =
+IMMUTABLE` — a deliberate supply-chain choice so a tag can never be
+silently repointed at different bytes.
+
 ## Decision
 
-Every build is tagged twice: the **7-character commit SHA** and
-**`latest`**. The cross-repo commit-back pins the sibling's
-kustomization to the **SHA tag** — that is the tag ArgoCD deploys.
-`latest` exists only as a convenience pointer for ad-hoc `docker pull`.
+CI tags and pushes exactly one tag to ECR: the **7-character commit
+SHA**. The cross-repo commit-back pins the sibling's kustomization to
+that SHA tag — it is the tag ArgoCD deploys.
+
+A moving `latest` tag is **not** pushed. It was in the original plan as
+an ad-hoc `docker pull` convenience, but `latest` is mutable by
+definition and cannot be re-pushed to an `IMMUTABLE` ECR repository —
+the second build's `latest` push fails with `tag invalid ... cannot be
+overwritten`. Immutability is the more valuable property, so `latest`
+is dropped rather than weakening the repository to `MUTABLE`.
+
+The local `make image` target still applies a `:latest` tag for
+developer convenience — a local Docker daemon has no immutability
+constraint. Only the ECR push is SHA-only.
 
 ## Consequences
 
 - Every deployed container maps to exactly one commit; rollback is
   "pin the previous SHA".
-- `latest` is never deployed — it is mutable and unsafe for that, and
-  is kept only for human convenience.
+- No tag in ECR is ever overwritten — immutability holds end to end.
+- No `latest` in the registry, so nothing can accidentally deploy a
+  floating tag.
 - No semantic version tag on the image. Releases are tracked as git
-  tags on the repository, not as image tags. This is sufficient: the
+  tags on the repository, not as image tags — sufficient, since the
   image is an internal artifact, not a published distribution.

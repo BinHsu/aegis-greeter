@@ -30,3 +30,23 @@ only for a concrete blocking reason.
   download — `GOTOOLCHAIN=auto` only fetches when the host is behind.
 - The pin must be bumped as new Go releases land. This is a deliberate,
   low-cost maintenance task, not drift — staying current is the goal.
+
+## Alternatives considered
+
+- **Pin an older "safe" Go release** — the original plan. Abandoned
+  when `go mod tidy` raised the floor anyway (a current `golangci-lint`
+  requires recent Go): the "safe" pin was neither safe nor stable,
+  just behind.
+- **No `toolchain` directive — build with whatever host Go is present**
+  — reproducibility evaporates; two machines on two Go versions can
+  produce two behaviours. The directive removes that variable.
+- **`GOTOOLCHAIN=local`** — forbids the auto-download and forces the
+  host to match. Hostile to a reviewer whose host Go differs; `auto`
+  fetches on demand instead.
+
+## Out of scope / when to revisit
+
+- Automating the pin bump — a dependency bot (Renovate / Dependabot)
+  can raise the `go` / `toolchain` directives on a schedule. Worth
+  wiring if the pin starts lagging; today the bump is a deliberate,
+  reviewed one-liner.

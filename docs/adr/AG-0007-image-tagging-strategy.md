@@ -41,3 +41,24 @@ constraint. Only the ECR push is SHA-only.
 - No semantic version tag on the image. Releases are tracked as git
   tags on the repository, not as image tags — sufficient, since the
   image is an internal artifact, not a published distribution.
+
+## Alternatives considered
+
+- **A moving `latest` tag** — covered in the Decision: incompatible
+  with an `IMMUTABLE` ECR repository, and immutability is worth more
+  than the pull-convenience `latest` offered.
+- **Semantic-version image tags** (`v1.2.3`) — meaningful for a
+  published, externally-consumed image; this is an internal deploy
+  artifact, and the git repo already carries semver tags.
+- **Date / build-number tags** — sortable, but not traceable back to a
+  commit without a lookup. The commit SHA is both unique and the
+  pointer to the source.
+- **Full 40-character SHA** — unambiguous but unwieldy in `kubectl`
+  and dashboard output; the 7-character short SHA is the git
+  convention and collision-safe at this repo's scale.
+
+## Out of scope / when to revisit
+
+- Semantic-version image tags — revisit only if the image stops being
+  an internal artifact and becomes something external consumers pull
+  by version.

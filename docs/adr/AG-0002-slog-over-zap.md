@@ -26,3 +26,20 @@ third-party logging dependency is added.
   no evidence this matters for this service. The decision is
   pain-driven: adopt a faster logger only when a profile shows logging
   on a hot path. Until then, the dependency is not worth its cost.
+
+## Alternatives considered
+
+- **`uber-go/zap`** — fastest of the common choices, but a dependency
+  whose speed only matters under logging volume this service does not
+  have. The senior move is to adopt it on evidence, not on reputation.
+- **`rs/zerolog`** — similar trade-off to `zap`: fast, ergonomic,
+  still a dependency earning its place only under load.
+- **The older `log` stdlib package** — no structured output, so it
+  fails the Loki ingestion contract (AG-0008) outright.
+
+## Out of scope / when to revisit
+
+- Revisit the moment a CPU profile (Pyroscope is already wired —
+  AG-0009) shows logging on a hot path. The migration is mechanical:
+  `slog.Handler` is an interface, and the trace-context handler in
+  `internal/telemetry` is the only custom piece to re-home.

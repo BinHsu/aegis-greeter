@@ -37,3 +37,25 @@ needs are fully met by Go-native primitives.
 - Cost: `./bin/` tools are rebuilt per machine, and the first
   `golangci-lint` build from source is slow (mitigated by the Go build
   cache on repeat runs).
+
+## Alternatives considered
+
+- **`nix flake` / `devbox` / `mise`** — solve host isolation more
+  completely (they pin non-Go tools too), but add a non-Go dependency
+  and a second lockfile for a project whose only dev tools are Go
+  binaries.
+- **Commit the tool binaries into the repo** — zero setup for a
+  reviewer, but bloats the repo, is not multi-arch, and the binaries
+  go stale silently.
+- **Document the versions and let each developer install them** — no
+  enforcement; versions drift between machines, which is the exact
+  problem this ADR exists to prevent.
+
+## Out of scope / when to revisit
+
+- Prebuilt-binary or devcontainer distribution of the dev tools —
+  revisit if `make dev-setup` build-from-source time becomes real
+  friction (today it is a one-time cost the Go build cache absorbs).
+- Pinning a non-Go tool — `hadolint` already runs via a pinned Docker
+  image rather than a host install; if more such tools appear,
+  reassess whether a general-purpose version manager earns its keep.

@@ -33,3 +33,20 @@ staying single-file.
 - Cost: one extra directory level for a project with a single binary.
   Accepted — the layout signals production intent to a reviewer and
   leaves room for a second command without restructuring.
+
+## Alternatives considered
+
+- **Single flat `greeter.go`** — where the project started. Fine at
+  ~30 lines; illegible at ~600 across telemetry, handlers, and
+  metrics concerns.
+- **Flat root, multiple files in `package main`** — splits the
+  concerns without the directory depth, but loses the `internal/`
+  compile-time boundary and reads as a script rather than a service.
+- **The full `golang-standards/project-layout`** (`pkg/`, `api/`,
+  `configs/`, …) — ceremony far beyond a single-binary service.
+
+## Out of scope / when to revisit
+
+- A `pkg/` directory — only if code here becomes genuinely reusable by
+  another module. `internal/` deliberately forbids that today; the day
+  there is a real external consumer is the day to reconsider.

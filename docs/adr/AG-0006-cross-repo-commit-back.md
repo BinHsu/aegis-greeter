@@ -32,3 +32,23 @@ awkward to scope to `contents` alone.
 - The default `GITHUB_TOKEN` cannot do this — it is scoped to the
   current repo only — so a separate credential is unavoidable
   regardless of mechanism.
+
+## Alternatives considered
+
+- **GitHub App** — no token expiry to rotate, finer-grained
+  installation scoping. Operationally heavier to set up and run than
+  one repo pair justifies; the right answer once several repos need
+  cross-writes.
+- **Deploy key (SSH)** — repo-scoped, but SSH-only and cannot be
+  scoped to `contents` alone; it grants more than the commit-back
+  needs.
+- **ArgoCD Image Updater** — moves image-tag bumping into the cluster
+  and removes the cross-repo write entirely. Rejected for this POC: it
+  adds a cluster component and inverts the "CI owns the git commit"
+  GitOps shape this project demonstrates.
+
+## Out of scope / when to revisit
+
+- Migrate to a GitHub App when more than one repo needs to write to
+  the infra repo, or when 90-day PAT rotation becomes a recurring
+  operational cost rather than a calendar footnote.

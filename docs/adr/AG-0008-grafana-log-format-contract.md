@@ -33,3 +33,24 @@ Alloy enriches the rest at ingestion.
 - The field set is a contract with the sibling repo's Alloy
   configuration — changing it is a cross-repo coordination, not a local
   edit.
+
+## Alternatives considered
+
+- **Nested JSON** (`{"trace": {"id": ...}}`) — structurally tidy, but
+  Loki label and field extraction is cheapest against flat keys; the
+  nesting buys nothing the query side wants.
+- **`logfmt`** — lighter than JSON, but `slog`'s first-class handler
+  is JSON and Loki parses JSON natively; `logfmt` would be a custom
+  handler for no gain.
+- **CloudWatch Logs Insights key names** — the original draft, retired
+  when the observability backend was pinned to Grafana Cloud
+  (cross-repo issue #1).
+- **Emitting K8s metadata** (`namespace`, `labels`) from the app —
+  rejected; Alloy's `kubernetes` enrichment adds these at ingestion,
+  and duplicating them in the app is redundant and a drift risk.
+
+## Out of scope / when to revisit
+
+- An explicit `schema_version` field — worth adding if the record
+  grows past the current small fixed set and consumers must handle
+  more than one shape. At seven keys, it is premature.

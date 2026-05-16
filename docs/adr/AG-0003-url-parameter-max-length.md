@@ -27,3 +27,23 @@ exactly 256, and 257 (`MaxNameLen` and `MaxNameLen+1`).
   invalid rather than receiving a silently altered greeting.
 - 256 is a chosen constant, not derived from a spec. It is a single
   named constant (`handlers.MaxNameLen`), trivial to revise.
+
+## Alternatives considered
+
+- **Silently truncate at 256 bytes** — the caller would receive a
+  greeting addressed to a name they did not send, with no signal
+  anything was wrong. A wrong-but-200 response is worse than an honest
+  400.
+- **No application-level limit** — rely on `net/http`'s header / URL
+  size limits. That bounds the request but not the `name` field
+  specifically, and the effective limit becomes a standard-library
+  implementation detail rather than a stated contract.
+- **413 Payload Too Large instead of 400** — 413 is about the request
+  body; an over-long query parameter is a malformed *request*, so 400
+  is the accurate status.
+
+## Out of scope / when to revisit
+
+- The 256-byte cap is a self-chosen default, not a spec value.
+  Revisit if a downstream system defines an authoritative maximum for
+  the name field — at which point `handlers.MaxNameLen` aligns to it.

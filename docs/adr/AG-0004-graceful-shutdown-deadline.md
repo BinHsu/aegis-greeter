@@ -27,3 +27,26 @@ trace and metric providers.
   `terminationGracePeriodSeconds`. If the sibling repo lowers that
   value below 30, this constant must drop in step. The coupling is
   noted here so the dependency is not silent.
+
+## Alternatives considered
+
+- **No graceful shutdown — exit immediately on `SIGTERM`** — drops
+  in-flight requests and loses the final telemetry batch. Unacceptable
+  for a service behind a load balancer.
+- **A configurable deadline (env var)** — flexibility nobody has
+  asked for. The deadline is derived from one fact, the Kubernetes
+  `terminationGracePeriodSeconds`; a hardcoded constant with a
+  documented derivation is honest, where an env var would invite an
+  inconsistent pair.
+- **A pre-shutdown sleep before draining** — a common pattern to let
+  endpoint removal propagate before the listener closes. Left out
+  because the readiness flip to 503 already happens first; see below.
+
+## Out of scope / when to revisit
+
+- A short pre-shutdown sleep between the readiness flip and
+  `http.Server.Shutdown`, to let kube-proxy / endpoint controllers
+  observe the 503 before new connections are refused. Revisit if a
+  rolling deploy is observed to drop a small number of requests.
+- Making the deadline configurable — revisit only if the sibling repo
+  sets a non-default `terminationGracePeriodSeconds`.

@@ -26,3 +26,25 @@ runs as `USER nonroot:nonroot`.
 - No shell for in-container debugging. When debugging is genuinely
   needed, use the `:debug` distroless variant or a Kubernetes ephemeral
   container — the production image stays minimal.
+
+## Alternatives considered
+
+- **`alpine`** — small, but ships a shell, `apk`, and musl libc:
+  exploitation surface and scanner noise the static binary does not
+  need.
+- **`scratch`** — even smaller than distroless static, but carries no
+  CA certificates and no `/etc/passwd`. The greeter makes outbound TLS
+  calls (OTLP) and runs as a named non-root user, so it needs both —
+  distroless static provides exactly those and nothing more.
+- **`debian-slim` / `ubuntu`** — a full userland for a static binary
+  that uses none of it. Rejected on CVE surface.
+- **`distroless/static-debian12:nonroot`** — the same image with the
+  `nonroot` user preset. Functionally equivalent; `USER nonroot` is
+  set explicitly in the Dockerfile instead, so the choice is visible
+  in the build rather than inherited from a tag.
+
+## Out of scope / when to revisit
+
+- If the build ever needs `CGO_ENABLED=1` (a C dependency), the static
+  base no longer suffices — `gcr.io/distroless/base` (with glibc)
+  becomes the floor. No such dependency is on the horizon.

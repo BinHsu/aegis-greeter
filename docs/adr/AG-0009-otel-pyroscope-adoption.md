@@ -41,3 +41,25 @@ to a no-op and never blocks or crashes the request path.
 - Fail-soft handling is required at every exporter boundary and is
   covered by Boundary Value Analysis tests (empty / valid / unreachable
   endpoints).
+
+## Alternatives considered
+
+- **`prometheus/client_golang`** — the established Go metrics library.
+  Rejected as a *second* metrics stack alongside OTel: dual pipelines
+  cause cardinality drift and dashboard confusion. OTel's
+  `MeterProvider` is the single interface, by decision.
+- **A vendor APM SDK** (Datadog, AWS X-Ray SDK) — ergonomic, but locks
+  instrumentation to one backend and undercuts the vendor-neutrality
+  this ADR exists to keep.
+- **DIY instrumentation** (hand-rolled Prometheus counters + manual
+  trace headers) — re-implements a large fraction of OTel, worse.
+
+## Out of scope / when to revisit
+
+- **Sampling strategy** — the tracer samples at ratio 1.0 (every
+  request) for take-home scale. Revisit under real traffic: a
+  `parentbased(traceidratio)` with an error-biased tail sampler is the
+  next step once trace volume has a cost.
+- **Span-to-metrics, browser RUM, profiling tuning** — deferred; the
+  current SDK wiring is the foundation they would build on, not a
+  rework.

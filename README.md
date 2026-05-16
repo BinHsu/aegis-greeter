@@ -18,22 +18,22 @@ touching the cluster.
 | You want to… | Start here |
 |---|---|
 | Run it in 30 seconds | [Run it locally](#run-it-locally) |
+| Call the API | [HTTP API](#http-api) · [Metrics](#metrics) |
 | Understand the design | [Architecture](#architecture) + the [ADRs](docs/adr/) |
 | Review the engineering | [Quality gates](#quality-gates) + [CI/CD](#cicd) |
 | See what is deferred, and why | [Known limitations](#known-limitations) |
 | Lift it as a starting point | [Reusing this as a template](#reusing-this-as-a-template) |
 
-## What it does
+## HTTP API
 
-`GET /` answers `Hello, <name>! I'm <hostname>`. The `name` comes from
-the `?name=` query parameter; with no parameter it falls back to the
-caller IP (read from `X-Forwarded-For` when present, else `RemoteAddr`).
+Three endpoints, all `GET`, all plain-text responses — no request body,
+no authentication, no versioning.
 
-| Path | Purpose | Behavior |
+| Endpoint | Request | Responses |
 |---|---|---|
-| `GET /?name=<value>` | Greeter | 200 with the greeting. `name` is capped at 256 bytes; longer → 400. |
-| `GET /healthz` | Liveness probe | Always 200 once the process is up. |
-| `GET /readyz` | Readiness probe | 200 once the listener is bound; 503 before that and after `SIGTERM` so the pod drains before termination. |
+| `GET /` | `?name=` — optional, max 256 bytes | **`200`** `text/plain` — `Hello, <name>! I'm <hostname>`. With no `name` (or an empty value), `<name>` is the caller IP — `X-Forwarded-For` if present, else `RemoteAddr`. **`400`** — `name` exceeds 256 bytes. |
+| `GET /healthz` | — | **`200`**, empty body — unconditional once the process is up. The Kubernetes liveness target. |
+| `GET /readyz` | — | **`200`** while serving, **`503`** before the listener binds and during the shutdown drain. The Kubernetes readiness target — see [Lifecycle](#lifecycle). |
 
 ## Lifecycle
 
@@ -101,6 +101,25 @@ local Grafana Alloy DaemonSet:
 
 Every exporter is fail-soft: an empty or unreachable endpoint degrades
 that subsystem to a no-op and never blocks the request path.
+
+## Metrics
+
+Metrics leave the process over OTLP gRPC (see [Observability](#observability)
+for the pipeline). Two custom business instruments, plus the standard
+HTTP RED metrics the `otelhttp` middleware emits automatically.
+
+| Metric | Type | Labels | What it tells you |
+|---|---|---|---|
+| `greeter_responses_total` | Counter | `personalized` = `true` \| `false` | Greetings served, split by whether the caller sent a non-empty `?name=`. `rate()` by the label is the personalized-vs-default request rate. |
+| `greeter_build_info` | Gauge | `version`, `commit` | Always `1`; the labels carry the running build's identity — the Prometheus "info" metric convention. |
+| `http.server.request.duration` | Histogram | `http.request.method`, `http.response.status_code`, `http.route` | Request latency; feed `histogram_quantile` for p50 / p95 / p99. |
+| `http.server.active_requests` | UpDownCounter | (as above) | In-flight request count. |
+| `http.server.request.body.size`, `…response.body.size` | Histogram | (as above) | Request / response payload size distribution. |
+
+The two `greeter_*` instruments are hand-written (`internal/metrics`); the
+`http.server.*` family is emitted by `otelhttp` on the stable OpenTelemetry
+HTTP semantic conventions. In Mimir the dotted names appear underscored —
+e.g. `http_server_request_duration_seconds_*`.
 
 ## Run it locally
 

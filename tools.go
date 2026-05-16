@@ -10,5 +10,6 @@ package tools
 import (
 	_ "github.com/golangci/golangci-lint/cmd/golangci-lint"
 	_ "github.com/rhysd/actionlint/cmd/actionlint"
+	_ "github.com/zricethezav/gitleaks/v8" // gitleaks module path; the repo moved to the gitleaks org but the module path did not
 	_ "golang.org/x/vuln/cmd/govulncheck"
 )

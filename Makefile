@@ -5,8 +5,8 @@ GOBIN := $(CURDIR)/bin
 PATH  := $(GOBIN):$(PATH)
 export GOBIN PATH
 
-.PHONY: dev-setup tidy vet test lint vuln build image hadolint actionlint \
-        precommit prepush hooks-install clean
+.PHONY: dev-setup tidy vet test lint vuln secrets build image hadolint \
+        actionlint precommit prepush hooks-install clean
 
 # Container image identity. IMAGE_TAG defaults to the 7-char git short
 # SHA so locally-built images are traceable to a commit. VERSION and
@@ -25,7 +25,8 @@ dev-setup:
 	go install -tags tools \
 	  github.com/golangci/golangci-lint/cmd/golangci-lint \
 	  golang.org/x/vuln/cmd/govulncheck \
-	  github.com/rhysd/actionlint/cmd/actionlint
+	  github.com/rhysd/actionlint/cmd/actionlint \
+	  github.com/zricethezav/gitleaks/v8
 
 tidy:
 	go mod tidy
@@ -41,6 +42,10 @@ lint: dev-setup
 
 vuln: dev-setup
 	$(GOBIN)/govulncheck ./...
+
+# secrets — scan the full git history for committed credentials.
+secrets: dev-setup
+	$(GOBIN)/gitleaks git --redact --no-banner .
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o ./bin/greeter ./cmd/greeter
@@ -74,7 +79,7 @@ precommit:
 
 # prepush — comprehensive local gate (pre-push hook target). Reuses the
 # same targets CI runs so "passes locally" predicts "passes CI".
-prepush: precommit test lint vuln actionlint hadolint
+prepush: precommit test lint vuln secrets actionlint hadolint
 	@echo "prepush gate clean — safe to push"
 
 # hooks-install — point git at the committed .githooks directory. Run

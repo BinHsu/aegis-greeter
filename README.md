@@ -152,7 +152,7 @@ in `go.mod` and dev tools install into `./bin/`.
 
 ```sh
 make hooks-install   # activate the git hooks (optional but recommended)
-make dev-setup       # install golangci-lint, govulncheck, actionlint into ./bin/
+make dev-setup       # install golangci-lint, govulncheck, actionlint, gitleaks into ./bin/
 make test            # run the suite with the race detector
 ```
 
@@ -168,7 +168,7 @@ cheaper it is to fix:
 | Stage | Trigger | Checks |
 |---|---|---|
 | `pre-commit` hook | every `git commit` | `gofmt`, `go vet`, `go build` |
-| `pre-push` hook | every `git push` | the above + `go test -race`, `golangci-lint`, `govulncheck`, `actionlint`, `hadolint` |
+| `pre-push` hook | every `git push` | the above + `go test -race`, `golangci-lint`, `govulncheck`, `gitleaks`, `actionlint`, `hadolint` |
 | GitHub Actions `ci.yml` | every PR and push | the full pre-push suite + container build + Trivy image scan |
 | GitHub Actions `codeql.yml` | push, PR | CodeQL static analysis (see [Known limitations](#known-limitations)) |
 | GitHub Actions `dependency-review.yml` | every PR | blocks PRs adding HIGH+ vulnerable dependencies |

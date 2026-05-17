@@ -9,7 +9,7 @@ import (
 
 // MaxNameLen is the byte-length cap on the ?name= URL parameter. Requests
 // above the cap are rejected with 400 Bad Request rather than truncated
-// silently — see ADR AG-0003.
+// silently — see ADR AG-02.
 const MaxNameLen = 256
 
 // ResponseRecorder is the metric sink the Greeter calls after each

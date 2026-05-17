@@ -23,8 +23,8 @@ project-scoped cache; nothing installs into the host `~/go/bin`,
   (Go's default since 1.21) the pinned compiler is fetched on demand,
   so the host Go version is irrelevant.
 - `tools.go`, behind a `//go:build tools` constraint, imports the dev
-  tools (`golangci-lint`, `govulncheck`, `actionlint`) so their
-  versions are tracked in `go.mod` / `go.sum` and hash-verified —
+  tools (`golangci-lint`, `govulncheck`, `actionlint`, `gitleaks`) so
+  their versions are tracked in `go.mod` / `go.sum` and hash-verified —
   without compiling them into the production binary.
 - The `Makefile` exports `GOBIN=$PWD/bin`; `make dev-setup` installs
   those tools into `./bin/` (gitignored).

@@ -31,7 +31,7 @@ const (
 	// shutdownDeadline is the budget for graceful shutdown: in-flight
 	// requests draining + OTel provider flushes. K8s default
 	// terminationGracePeriodSeconds is 30 s; 25 s leaves headroom for
-	// the kubelet SIGKILL. See ADR AG-0004.
+	// the kubelet SIGKILL. See ADR AG-02.
 	shutdownDeadline = 25 * time.Second
 
 	readHeaderTimeout = 5 * time.Second

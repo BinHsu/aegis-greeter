@@ -66,7 +66,7 @@ jobs:
         run: |
           # SHA tag only. The ECR repo is IMMUTABLE, so a moving
           # `latest` tag cannot be re-pushed — ArgoCD pins to the SHA
-          # tag regardless. See ADR AG-0007.
+          # tag regardless. See ADR AG-03.
           docker buildx build \
             --platform linux/amd64 \
             --build-arg VERSION="${IMAGE_TAG}" \

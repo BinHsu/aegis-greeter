@@ -19,7 +19,7 @@ touching the cluster.
 |---|---|
 | Run it in 30 seconds | [Run it locally](#run-it-locally) |
 | Call the API | [HTTP API](#http-api) · [Metrics](#metrics) |
-| Understand the design | [Architecture](#architecture) + the [ADRs](docs/adr/) |
+| Understand the design | [Architecture](#architecture) + the [ADRs](docs/adr/README.md) |
 | Review the engineering | [Quality gates](#quality-gates) + [CI/CD](#cicd) |
 | See what is deferred, and why | [Known limitations](#known-limitations) |
 | Lift it as a starting point | [Reusing this as a template](#reusing-this-as-a-template) |
@@ -244,7 +244,7 @@ Dockerfile, the CI, and the layout carry over unchanged.
 
 ## Decisions
 
-Architecture decision records live in [`docs/adr/`](docs/adr/) — four
+Architecture decision records live in [`docs/adr/`](docs/adr/README.md) — four
 thematic records (toolchain & layout, HTTP service design, container &
 delivery, observability). Each states the context, the decisions, the
 consequences, the alternatives considered, and what is out of scope

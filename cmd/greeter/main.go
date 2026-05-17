@@ -82,6 +82,7 @@ func run(ctx context.Context) error {
 	}
 
 	serviceName := envOrDefault("OTEL_SERVICE_NAME", defaultServiceName)
+	helloTag := os.Getenv("HELLO_TAG")
 	pod := os.Getenv("POD_NAME")
 	node := os.Getenv("NODE_NAME")
 
@@ -120,7 +121,7 @@ func run(ctx context.Context) error {
 	}
 
 	slog.Info("starting aegis-greeter",
-		"tag", os.Getenv("HELLO_TAG"),
+		"tag", helloTag,
 		"hostname", hostname,
 		"version", Version,
 		"commit", Commit,
@@ -130,7 +131,7 @@ func run(ctx context.Context) error {
 	addr := envOrDefault("LISTEN_ADDR", defaultAddr)
 
 	readiness := handlers.NewReadiness()
-	greeter := &handlers.Greeter{Hostname: hostname, Recorder: instruments}
+	greeter := &handlers.Greeter{Hostname: hostname, Tag: helloTag, Recorder: instruments}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", otelhttp.NewHandler(greeter, "greeter"))

@@ -81,3 +81,34 @@ func TestGetIPFromRequest_BVA(t *testing.T) {
 		})
 	}
 }
+
+// TestGreeter_Tag covers the HELLO_TAG-in-response behaviour: a
+// non-empty tag appears as a "[tag]" suffix after the hostname; an
+// empty tag — the boundary case — omits the suffix entirely.
+func TestGreeter_Tag(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		tag  string
+		want string
+	}{
+		{"tag present", "eu-central-1", "Hello, Operator! I'm test-host [eu-central-1]\n"},
+		{"tag empty: suffix omitted", "", "Hello, Operator! I'm test-host\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			g := &handlers.Greeter{Hostname: "test-host", Tag: tc.tag}
+			req := httptest.NewRequest(http.MethodGet, "/?name=Operator", nil)
+			rr := httptest.NewRecorder()
+
+			g.ServeHTTP(rr, req)
+
+			if rr.Body.String() != tc.want {
+				t.Errorf("body: got %q, want %q", rr.Body.String(), tc.want)
+			}
+		})
+	}
+}

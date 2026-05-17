@@ -31,7 +31,7 @@ no authentication, no versioning.
 
 | Endpoint | Request | Responses |
 |---|---|---|
-| `GET /` | `?name=` — optional, max 256 bytes | **`200`** `text/plain` — `Hello, <name>! I'm <hostname>`. With no `name` (or an empty value), `<name>` is the caller IP — `X-Forwarded-For` if present, else `RemoteAddr`. **`400`** — `name` exceeds 256 bytes. |
+| `GET /` | `?name=` — optional, max 256 bytes | **`200`** `text/plain` — `Hello, <name>! I'm <hostname> [<tag>]`. `<name>` is the `?name=` value, or the caller IP (`X-Forwarded-For` if present, else `RemoteAddr`) when absent. `<tag>` is the `HELLO_TAG` env value — the brief's "unique tag"; the `[<tag>]` suffix is omitted when `HELLO_TAG` is unset. **`400`** — `name` exceeds 256 bytes. |
 | `GET /healthz` | — | **`200`**, empty body — unconditional once the process is up. The Kubernetes liveness target. |
 | `GET /readyz` | — | **`200`** while serving, **`503`** before the listener binds and during the shutdown drain. The Kubernetes readiness target — see [Lifecycle](#lifecycle). |
 
@@ -127,8 +127,8 @@ Build and run the binary directly:
 
 ```sh
 make build                              # static binary → ./bin/greeter
-./bin/greeter &                         # listens on :8080
-curl 'localhost:8080/?name=Operator'    # → Hello, Operator! I'm <hostname>
+HELLO_TAG=demo ./bin/greeter &          # listens on :8080
+curl 'localhost:8080/?name=Operator'    # → Hello, Operator! I'm <hostname> [demo]
 curl  localhost:8080/                   # no name → falls back to caller IP
 curl  localhost:8080/healthz            # → 200
 curl  localhost:8080/readyz             # → 200
@@ -198,7 +198,7 @@ All configuration is environment variables; there is no config file.
 |---|---|---|
 | `LISTEN_ADDR` | `:8080` | Listen address. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARN` / `ERROR`. |
-| `HELLO_TAG` | — | Free-form release tag, logged at startup. |
+| `HELLO_TAG` | — | Unique tag echoed in the `GET /` greeting and logged at startup; the infra side sets it per region. |
 | `OTEL_SERVICE_NAME` | `aegis-greeter` | OpenTelemetry service name. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP gRPC endpoint; empty disables trace/metric export. |
 | `PYROSCOPE_ENDPOINT` | — | Pyroscope endpoint; empty disables profiling. |

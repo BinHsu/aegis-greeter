@@ -20,13 +20,15 @@ type ResponseRecorder interface {
 	RecordResponse(ctx context.Context, personalized bool)
 }
 
-// Greeter answers GET / with "Hello, <addressee>! I'm <hostname>",
+// Greeter answers GET / with "Hello, <addressee>! I'm <hostname> [<tag>]",
 // where addressee is the ?name= query parameter when present and the
-// caller IP otherwise. Recorder may be nil, in which case the metric
-// emission is skipped — useful in tests and in degraded telemetry
-// configurations.
+// caller IP otherwise, and <tag> is the HELLO_TAG value — the brief's
+// "unique tag". The "[<tag>]" suffix is omitted when Tag is empty.
+// Recorder may be nil, in which case the metric emission is skipped —
+// useful in tests and in degraded telemetry configurations.
 type Greeter struct {
 	Hostname string
+	Tag      string
 	Recorder ResponseRecorder
 }
 
@@ -44,7 +46,11 @@ func (g *Greeter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		addressee = GetIPFromRequest(r)
 	}
 
-	fmt.Fprintf(w, "Hello, %s! I'm %s\n", addressee, g.Hostname)
+	identity := g.Hostname
+	if g.Tag != "" {
+		identity += " [" + g.Tag + "]"
+	}
+	fmt.Fprintf(w, "Hello, %s! I'm %s\n", addressee, identity)
 
 	if g.Recorder != nil {
 		g.Recorder.RecordResponse(r.Context(), personalized)

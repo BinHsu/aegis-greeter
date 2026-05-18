@@ -1,7 +1,7 @@
 name: Publish
 
 # Builds the production image, pushes it to ECR, and commits the new
-# image tag back to the sibling infra repo (aegis-stateless). ArgoCD in
+# image tag back to the deploy repo (aegis-greeter_deploy). ArgoCD in
 # the cluster reconciles from there — this workflow never touches the
 # cluster directly. That is the GitOps invariant.
 #
@@ -10,8 +10,8 @@ name: Publish
 # failed. Required configuration before it activates:
 #   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
 #   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
-#                     aegis-stateless contents:write, with an expiry)
-# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of the sibling's
+#                     aegis-greeter_deploy contents:write, with an expiry)
+# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of aegis-platform's
 # platform/ environment.
 
 on:
@@ -85,24 +85,24 @@ jobs:
       - name: Push image to ECR
         run: docker push "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}"
 
-      - name: Commit image tag back to infra repo
+      - name: Commit image tag back to the deploy repo
         env:
           INFRA_REPO_PAT: ${{ secrets.INFRA_REPO_PAT }}
           ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
         run: |
           set -euo pipefail
-          # Full clone (not shallow) of the sibling infra repo, with a
-          # fine-grained PAT scoped to contents:write on aegis-stateless
+          # Full clone (not shallow) of the deploy repo, with a
+          # fine-grained PAT scoped to contents:write on aegis-greeter_deploy
           # only — full history is needed to rebase before pushing.
           git clone \
-            "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-stateless.git" \
-            infra
-          cd infra
+            "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-greeter_deploy.git" \
+            deploy
+          cd deploy
 
           # ArgoCD reconciles k8s/overlays/prod. The kustomization
           # images[] entry ships placeholder newName/newTag — the real
           # ECR URL embeds the AWS account ID and cannot be committed to
-          # the infra repo — so CI sets BOTH fields. yq is preinstalled
+          # the deploy repo — so CI sets BOTH fields. yq is preinstalled
           # on ubuntu runners (no curl|bash, no extra tool install).
           # Contract confirmed in aegis-stateless#9.
           yq -i '
@@ -119,7 +119,7 @@ jobs:
           fi
           git commit -m "Bump aegis-greeter image to ${IMAGE_TAG}"
           # Rebase onto any commits that landed since the clone so the
-          # bump lands as a single linear commit — aegis-stateless
-          # requires linear history on main.
+          # bump lands as a single linear commit on the deploy repo's
+          # main.
           git pull --rebase origin main
           git push origin main

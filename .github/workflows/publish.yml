@@ -1,7 +1,7 @@
 name: Publish
 
 # Builds the production image, pushes it to ECR, and commits the new
-# image tag back to the deploy repo (aegis-greeter_deploy). ArgoCD in
+# image tag back to the deploy repo (aegis-greeter-deploy). ArgoCD in
 # the cluster reconciles from there — this workflow never touches the
 # cluster directly. That is the GitOps invariant.
 #
@@ -10,7 +10,7 @@ name: Publish
 # failed. Required configuration before it activates:
 #   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
 #   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
-#                     aegis-greeter_deploy contents:write, with an expiry)
+#                     aegis-greeter-deploy contents:write, with an expiry)
 # ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of aegis-platform's
 # platform/ environment.
 
@@ -92,10 +92,10 @@ jobs:
         run: |
           set -euo pipefail
           # Full clone (not shallow) of the deploy repo, with a
-          # fine-grained PAT scoped to contents:write on aegis-greeter_deploy
+          # fine-grained PAT scoped to contents:write on aegis-greeter-deploy
           # only — full history is needed to rebase before pushing.
           git clone \
-            "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-greeter_deploy.git" \
+            "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-greeter-deploy.git" \
             deploy
           cd deploy
 

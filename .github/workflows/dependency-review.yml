@@ -3,6 +3,12 @@ name: Dependency Review
 # Blocks pull requests that introduce a dependency with a known
 # HIGH+ vulnerability or an incompatible license, before the change
 # ever reaches main. Diff-scoped — only reviews what the PR adds.
+#
+# The review job is gated on repository visibility: dependency-review
+# needs a public repo or GitHub Advanced Security, so while this repo
+# is private (Free plan, no GHAS) the job skips cleanly — the run
+# shows as skipped, not failed — and activates automatically once the
+# repo is made public. Mirrors the gating pattern in `codeql.yml`.
 
 on:
   pull_request:
@@ -12,6 +18,9 @@ permissions:
 
 jobs:
   review:
+    # See header comment — dependency-review needs a public repo or
+    # GitHub Advanced Security. Skip cleanly on private + Free plan.
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

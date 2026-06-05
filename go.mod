@@ -2,7 +2,7 @@ module github.com/BinHsu/aegis-greeter
 
 go 1.26.0
 
-toolchain go1.26.3
+toolchain go1.26.4
 
 require (
 	github.com/golangci/golangci-lint v1.64.8

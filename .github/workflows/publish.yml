@@ -1,18 +1,36 @@
 name: Publish
 
-# Builds the production image, pushes it to ECR, and commits the new
-# image tag back to the deploy repo (aegis-greeter-deploy). ArgoCD in
-# the cluster reconciles from there — this workflow never touches the
-# cluster directly. That is the GitOps invariant.
+# Builds the production image ONCE, pushes it to the single shared ECR,
+# captures the immutable image DIGEST, and commits that digest into the
+# deploy repo's STAGING overlay (aegis-greeter-deploy). ArgoCD in the
+# cluster reconciles from there — this workflow never touches the cluster
+# directly. That is the GitOps invariant.
+#
+# Build once, promote by digest (platform-aws ADR-10):
+#   - The artifact is built exactly once and referenced everywhere by its
+#     content digest (aegis-greeter@sha256:...), never rebuilt per env.
+#   - This workflow promotes the digest into STAGING only. Prod promotion
+#     is a separate, gated PR against the prod overlay — out of scope here.
+#   - Env differences (replicas/limits/host/role-trust) live in the
+#     deploy-repo overlays, not in the artifact.
+#
+# Single shared registry (platform-aws ADR-10): vars.ECR_REPO_URL /
+# vars.ECR_REGISTRY / vars.OIDC_ROLE_ARN now point at ONE shared ECR in a
+# dedicated "aegis-deployment" account (Deployments OU). The old per-env
+# dev/prod registry split is gone — staging and prod clusters both PULL
+# from this one registry by digest. The OIDC role is the scoped workload
+# push role (ecr:PutImage) in that account; the deployment account's
+# 12-digit id is never hardcoded here, it is carried by the var values.
 #
 # Inert until configured: the job is gated on vars.ECR_REPO_URL, so a
 # fresh clone with no AWS/PAT wiring shows this workflow as skipped, not
 # failed. Required configuration before it activates:
 #   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
+#     (repointed at the aegis-deployment-account ECR at rollout)
 #   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
 #                     aegis-greeter-deploy contents:write, with an expiry)
-# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of aegis-platform's
-# platform/ environment.
+# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of the
+# aegis-deployment account's registry/ environment.
 
 on:
   push:
@@ -60,35 +78,71 @@ jobs:
             | docker login --username AWS --password-stdin "${{ vars.ECR_REGISTRY }}"
 
       - name: Resolve image tag
+        # The SHA tag is a human-readable convenience handle in the
+        # registry. It is NOT what the deploy repo pins to — promotion is
+        # by digest. The ECR repo is IMMUTABLE, so this tag can never be
+        # repointed at different bytes. See ADR AG-03.
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Build image
+      - name: Build and push image (once), capturing the digest
         run: |
-          # SHA tag only. The ECR repo is IMMUTABLE, so a moving
-          # `latest` tag cannot be re-pushed — ArgoCD pins to the SHA
-          # tag regardless. See ADR AG-03.
+          # ONE build. --load makes the bytes available locally for the
+          # Trivy gate below; --push registers the same bytes in the
+          # single shared ECR; --metadata-file emits the registry
+          # manifest digest (containerimage.digest) so the deploy repo can
+          # pin by digest. There is exactly one build and one digest — the
+          # build-once posture. See platform-aws ADR-10.
           docker buildx build \
             --platform linux/amd64 \
             --build-arg VERSION="${IMAGE_TAG}" \
             --build-arg COMMIT="${GITHUB_SHA}" \
             --tag "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}" \
+            --metadata-file metadata.json \
             --load \
+            --push \
             .
 
       - name: Trivy scan the release image (HIGH/CRITICAL)
+        # Scans the loaded bytes — the same content that was pushed in the
+        # single build step above. A failure here gates promotion: the
+        # digest is never written into the deploy repo.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ vars.ECR_REPO_URL }}:${{ env.IMAGE_TAG }}
           severity: HIGH,CRITICAL
           exit-code: '1'
 
-      - name: Push image to ECR
-        run: docker push "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}"
+      - name: Resolve image digest
+        env:
+          ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
+        run: |
+          set -euo pipefail
+          # buildx wrote the registry manifest digest to metadata.json
+          # under .["containerimage.digest"]. jq is preinstalled on ubuntu
+          # runners. Fall back to `aws ecr describe-images` by tag if the
+          # metadata key is ever absent, so the workflow is not silently
+          # wedged on a buildx output-format change.
+          DIGEST="$(jq -er '.["containerimage.digest"]' metadata.json 2>/dev/null || true)"
+          if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
+            # Strip the registry/path prefix to the bare ECR repo name
+            # (everything after the last '/').
+            REPO_NAME="${ECR_REPO_URL##*/}"
+            DIGEST="$(aws ecr describe-images \
+              --region "${{ vars.AWS_REGION }}" \
+              --repository-name "${REPO_NAME}" \
+              --image-ids imageTag="${IMAGE_TAG}" \
+              --query 'imageDetails[0].imageDigest' --output text)"
+          fi
+          case "${DIGEST}" in
+            sha256:*) ;;
+            *) echo "::error::resolved digest is not a sha256 ref: ${DIGEST}"; exit 1 ;;
+          esac
+          echo "IMAGE_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
+          echo "Resolved image digest: ${DIGEST}"
 
-      - name: Commit image tag back to the deploy repo
+      - name: Promote digest into the deploy repo (staging overlay)
         env:
           INFRA_REPO_PAT: ${{ secrets.INFRA_REPO_PAT }}
-          ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
         run: |
           set -euo pipefail
           # Full clone (not shallow) of the deploy repo, with a
@@ -97,29 +151,30 @@ jobs:
           git clone \
             "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-greeter-deploy.git" \
             deploy
-          cd deploy
+          cd deploy/k8s/overlays/staging
 
-          # ArgoCD reconciles k8s/overlays/prod. The kustomization
-          # images[] entry ships placeholder newName/newTag — the real
-          # ECR URL embeds the AWS account ID and cannot be committed to
-          # the deploy repo — so CI sets BOTH fields. yq is preinstalled
-          # on ubuntu runners (no curl|bash, no extra tool install).
-          # Contract confirmed in aegis-stateless#9.
-          yq -i '
-            (.images[] | select(.name == "aegis-greeter") | .newName) = strenv(ECR_REPO_URL) |
-            (.images[] | select(.name == "aegis-greeter") | .newTag)  = strenv(IMAGE_TAG)
-          ' k8s/overlays/prod/kustomization.yaml
+          # Pin STAGING to the immutable digest. `kustomize edit set image`
+          # writes images[].digest (and clears any newTag) for the
+          # `aegis-greeter` entry. The deploy repo carries only the bare
+          # image NAME + the digest — the registry URL (newName) is the
+          # single aegis-deployment ECR, injected at ArgoCD sync time from
+          # the platform's registries.auto.tfvars.json, so the account ID
+          # never lands in the deploy repo. kustomize is preinstalled on
+          # ubuntu runners (no curl|bash, no extra tool install). See
+          # platform-aws ADR-10. Prod is promoted separately by a gated PR
+          # against k8s/overlays/prod — this workflow never writes prod.
+          kustomize edit set image "aegis-greeter@${IMAGE_DIGEST}"
 
+          cd "${GITHUB_WORKSPACE}/deploy"
           git config user.name "BinHsu"
           git config user.email "10249382+BinHsu@users.noreply.github.com"
-          git add k8s/overlays/prod/kustomization.yaml
+          git add k8s/overlays/staging/kustomization.yaml
           if git diff --cached --quiet; then
-            echo "image tag unchanged — nothing to commit"
+            echo "image digest unchanged — nothing to commit"
             exit 0
           fi
-          git commit -m "Bump aegis-greeter image to ${IMAGE_TAG}"
+          git commit -m "Promote aegis-greeter to staging @ ${IMAGE_DIGEST}"
           # Rebase onto any commits that landed since the clone so the
-          # bump lands as a single linear commit on the deploy repo's
-          # main.
+          # bump lands as a single linear commit on the deploy repo's main.
           git pull --rebase origin main
           git push origin main

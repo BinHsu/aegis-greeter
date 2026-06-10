@@ -1,10 +1,11 @@
 name: Publish
 
 # Builds the production image ONCE, pushes it to the single shared ECR,
-# captures the immutable image DIGEST, and commits that digest into the
-# deploy repo's STAGING overlay (aegis-greeter-deploy). ArgoCD in the
-# cluster reconciles from there — this workflow never touches the cluster
-# directly. That is the GitOps invariant.
+# captures the immutable image DIGEST, and opens an auto-merge PR that
+# bumps that digest in the deploy repo's STAGING overlay
+# (aegis-greeter-deploy). ArgoCD in the cluster reconciles from there —
+# this workflow never touches the cluster directly. That is the GitOps
+# invariant.
 #
 # Build once, promote by digest (platform-aws ADR-10):
 #   - The artifact is built exactly once and referenced everywhere by its
@@ -28,7 +29,8 @@ name: Publish
 #   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
 #     (repointed at the aegis-deployment-account ECR at rollout)
 #   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
-#                     aegis-greeter-deploy contents:write, with an expiry)
+#                     aegis-greeter-deploy contents:write +
+#                     pull-requests:write, with an expiry)
 # ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of the
 # aegis-deployment account's registry/ environment.
 
@@ -140,15 +142,20 @@ jobs:
           echo "IMAGE_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
           echo "Resolved image digest: ${DIGEST}"
 
-      - name: Promote digest into the deploy repo (staging overlay)
+      - name: Promote digest into the deploy repo (staging overlay, via PR)
         env:
           INFRA_REPO_PAT: ${{ secrets.INFRA_REPO_PAT }}
         run: |
           set -euo pipefail
-          # Full clone (not shallow) of the deploy repo, with a
-          # fine-grained PAT scoped to contents:write on aegis-greeter-deploy
-          # only — full history is needed to rebase before pushing.
-          git clone \
+          # The deploy repo's main is ruleset-protected: PR required,
+          # CodeRabbit required status check, signed commits, squash-only.
+          # A direct `git push origin main` only ever landed via the admin
+          # bypass — so the bump goes through a branch + auto-merge PR
+          # instead. A shallow clone is enough: the bump lands on a NEW
+          # branch, nothing rebases onto main anymore. The fine-grained
+          # PAT is scoped to aegis-greeter-deploy contents:write +
+          # pull-requests:write only.
+          git clone --depth 1 \
             "https://x-access-token:${INFRA_REPO_PAT}@github.com/BinHsu/aegis-greeter-deploy.git" \
             deploy
           cd deploy/k8s/overlays/staging
@@ -156,13 +163,15 @@ jobs:
           # Pin STAGING to the immutable digest. `kustomize edit set image`
           # writes images[].digest (and clears any newTag) for the
           # `aegis-greeter` entry. The deploy repo carries only the bare
-          # image NAME + the digest — the registry URL (newName) is the
-          # single aegis-deployment ECR, injected at ArgoCD sync time from
-          # the platform's registries.auto.tfvars.json, so the account ID
-          # never lands in the deploy repo. kustomize is preinstalled on
-          # ubuntu runners (no curl|bash, no extra tool install). See
-          # platform-aws ADR-10. Prod is promoted separately by a gated PR
-          # against k8s/overlays/prod — this workflow never writes prod.
+          # image NAME + the digest — the registry URL is the single
+          # aegis-deployment ECR, injected at ArgoCD sync time as the
+          # `aegis.binhsu.org/ecr-repository` annotation (the deploy repo's
+          # overlays splice it in front of the digest via kustomize
+          # `replacements`), so the account ID never lands in the deploy
+          # repo. kustomize is preinstalled on ubuntu runners (no
+          # curl|bash, no extra tool install). See platform-aws ADR-10.
+          # Prod is promoted separately by a gated PR against
+          # k8s/overlays/prod — this workflow never writes prod.
           kustomize edit set image "aegis-greeter@${IMAGE_DIGEST}"
 
           cd "${GITHUB_WORKSPACE}/deploy"
@@ -173,8 +182,36 @@ jobs:
             echo "image digest unchanged — nothing to commit"
             exit 0
           fi
-          git commit -m "Promote aegis-greeter to staging @ ${IMAGE_DIGEST}"
-          # Rebase onto any commits that landed since the clone so the
-          # bump lands as a single linear commit on the deploy repo's main.
-          git pull --rebase origin main
-          git push origin main
+
+          BRANCH="release/digest-${IMAGE_TAG}"
+          git checkout -b "${BRANCH}"
+          git commit -m "chore(release): bump staging digest to ${IMAGE_TAG}" \
+            -m "Image: aegis-greeter@${IMAGE_DIGEST}"
+          # --force: a re-run of this workflow for the same source commit
+          # recreates the same branch; the fresh bump replaces the
+          # previous attempt.
+          git push --force origin "${BRANCH}"
+
+          # PR + auto-merge with the SAME fine-grained PAT (it carries
+          # pull-requests:write next to contents:write). `gh pr merge
+          # --auto` only ARMS auto-merge: GitHub squash-merges after the
+          # required CodeRabbit check/review passes — nothing merges
+          # before that gate. Requires "Allow auto-merge" enabled on the
+          # deploy repo. The PR body cites the bare image name + digest,
+          # NOT the registry URL — the URL embeds the AWS account ID and
+          # the deploy repo is public.
+          export GH_TOKEN="${INFRA_REPO_PAT}"
+          # Re-run for the same source commit: reuse the still-open PR
+          # instead of failing on a duplicate create. `.[].number` prints
+          # nothing when the list is empty (and `gh pr list` exits 0).
+          EXISTING_PR="$(gh pr list --repo BinHsu/aegis-greeter-deploy \
+            --head "${BRANCH}" --state open --json number --jq '.[].number')"
+          if [ -z "${EXISTING_PR}" ]; then
+            gh pr create --repo BinHsu/aegis-greeter-deploy \
+              --base main --head "${BRANCH}" \
+              --title "chore(release): bump staging digest to ${IMAGE_TAG}" \
+              --body "$(printf 'Image: %s\n\nPromotes the freshly built digest into the staging overlay (build once, promote by digest — platform-aws ADR-10).\n\nAutomated by aegis-greeter publish.yml (source commit %s). Auto-merge is armed: the PR merges once the required CodeRabbit check/review passes.' \
+                "aegis-greeter@${IMAGE_DIGEST}" "${GITHUB_SHA}")"
+          fi
+          gh pr merge --auto --squash \
+            --repo BinHsu/aegis-greeter-deploy "${BRANCH}"

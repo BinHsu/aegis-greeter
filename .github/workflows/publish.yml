@@ -115,26 +115,36 @@ jobs:
           exit-code: '1'
 
       - name: Resolve image digest
+        # REGISTRY-AUTHORITATIVE: `aws ecr describe-images` by the
+        # immutable just-pushed tag is the only ground truth for what is
+        # pullable. On 2026-06-12 buildx metadata reported sha256:46c383…
+        # while the registry's freshly-pushed tag pointed at sha256:0e6f3e…
+        # (the 46c383 manifest did not exist in the repo — a buildx
+        # provenance/index reporting quirk). That wrong digest flowed into
+        # the deploy-repo PR → pod ErrImagePull NotFound. The fix: describe-
+        # images is PRIMARY; buildx metadata is a cross-check only.
         env:
           ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
         run: |
           set -euo pipefail
-          # buildx wrote the registry manifest digest to metadata.json
-          # under .["containerimage.digest"]. jq is preinstalled on ubuntu
-          # runners. Fall back to `aws ecr describe-images` by tag if the
-          # metadata key is ever absent, so the workflow is not silently
-          # wedged on a buildx output-format change.
-          DIGEST="$(jq -er '.["containerimage.digest"]' metadata.json 2>/dev/null || true)"
-          if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
-            # Strip the registry/path prefix to the bare ECR repo name
-            # (everything after the last '/').
-            REPO_NAME="${ECR_REPO_URL##*/}"
-            DIGEST="$(aws ecr describe-images \
-              --region "${{ vars.AWS_REGION }}" \
-              --repository-name "${REPO_NAME}" \
-              --image-ids imageTag="${IMAGE_TAG}" \
-              --query 'imageDetails[0].imageDigest' --output text)"
+          # PRIMARY: ask the registry what digest the just-pushed tag
+          # resolves to. Strip the registry/path prefix to the bare ECR repo
+          # name (everything after the last '/').
+          REPO_NAME="${ECR_REPO_URL##*/}"
+          DIGEST="$(aws ecr describe-images \
+            --region "${{ vars.AWS_REGION }}" \
+            --repository-name "${REPO_NAME}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+
+          # CROSS-CHECK: read the buildx metadata value and warn if it
+          # differs from what the registry just confirmed. The registry wins
+          # either way — this warning surfaces provenance/index quirks early.
+          BUILDX_DIGEST="$(jq -r '.["containerimage.digest"] // empty' metadata.json 2>/dev/null || true)"
+          if [ -n "${BUILDX_DIGEST}" ] && [ "${BUILDX_DIGEST}" != "${DIGEST}" ]; then
+            echo "::warning::buildx metadata digest (${BUILDX_DIGEST}) differs from registry digest (${DIGEST}); registry value used (2026-06-12 ErrImagePull precedent)"
           fi
+
           case "${DIGEST}" in
             sha256:*) ;;
             *) echo "::error::resolved digest is not a sha256 ref: ${DIGEST}"; exit 1 ;;

@@ -1,11 +1,11 @@
 name: Publish
 
-# Builds the production image ONCE, pushes it to the single shared ECR,
-# captures the immutable image DIGEST, and opens an auto-merge PR that
-# bumps that digest in the deploy repo's STAGING overlay
-# (aegis-greeter-deploy). ArgoCD in the cluster reconciles from there —
-# this workflow never touches the cluster directly. That is the GitOps
-# invariant.
+# Builds the production image ONCE, pushes it to GitHub Container
+# Registry (ghcr.io), captures the immutable image DIGEST, and opens an
+# auto-merge PR that bumps that digest in the deploy repo's STAGING
+# overlay (aegis-greeter-deploy). ArgoCD in the cluster reconciles from
+# there — this workflow never touches the cluster directly. That is the
+# GitOps invariant.
 #
 # Build once, promote by digest (platform-aws ADR-10):
 #   - The artifact is built exactly once and referenced everywhere by its
@@ -15,24 +15,28 @@ name: Publish
 #   - Env differences (replicas/limits/host/role-trust) live in the
 #     deploy-repo overlays, not in the artifact.
 #
-# Single shared registry (platform-aws ADR-10): vars.ECR_REPO_URL /
-# vars.ECR_REGISTRY / vars.OIDC_ROLE_ARN now point at ONE shared ECR in a
-# dedicated "aegis-deployment" account (Deployments OU). The old per-env
-# dev/prod registry split is gone — staging and prod clusters both PULL
-# from this one registry by digest. The OIDC role is the scoped workload
-# push role (ecr:PutImage) in that account; the deployment account's
-# 12-digit id is never hardcoded here, it is carried by the var values.
+# Registry: GHCR, not AWS ECR (2026-07-21 decision). The previous ECR +
+# AWS OIDC setup never actually worked — the `aegis-greeter-ci-push` IAM
+# role's trust policy was never configured for this repo, so every run
+# failed on sts:AssumeRoleWithWebIdentity. GHCR needs no external trust
+# setup: auth is the built-in GITHUB_TOKEN, always present, scoped to
+# this repo only. The image lives at ghcr.io/binhsu/aegis-greeter (GHCR
+# requires a lowercase owner path — hardcoded below rather than
+# lowercasing github.repository_owner at runtime, since Actions has no
+# built-in lowercase function).
 #
-# Inert until configured: the job is gated on vars.ECR_REPO_URL, so a
-# fresh clone with no AWS/PAT wiring shows this workflow as skipped, not
-# failed. Required configuration before it activates:
-#   - repo variables: ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION
-#     (repointed at the aegis-deployment-account ECR at rollout)
-#   - repo secret:    INFRA_REPO_PAT (fine-grained PAT, scoped to
-#                     aegis-greeter-deploy contents:write +
-#                     pull-requests:write, with an expiry)
-# ECR_REPO_URL and OIDC_ROLE_ARN are Terraform outputs of the
-# aegis-deployment account's registry/ environment.
+# CONSUMER-SIDE IMPACT: anything that previously pulled this image from
+# the AWS ECR registry (deploy-repo overlays, cluster imagePullSecrets)
+# must be repointed at ghcr.io/binhsu/aegis-greeter, and given a GHCR
+# imagePullSecret if the package is private. The now-unused repo
+# variables (ECR_REPO_URL, ECR_REGISTRY, OIDC_ROLE_ARN, AWS_REGION) are
+# left for the owner to remove; nothing in this workflow reads them
+# anymore.
+#
+# repo secret still required:
+#   - INFRA_REPO_PAT (fine-grained PAT, scoped to aegis-greeter-deploy
+#     contents:write + pull-requests:write, with an expiry) — used only
+#     by the digest-promotion step below, unrelated to the registry.
 
 on:
   push:
@@ -40,15 +44,17 @@ on:
 
 permissions:
   contents: read
-  id-token: write # mint the OIDC token for AWS role assumption
+  packages: write # push the image to ghcr.io under this repo
 
 concurrency:
   group: publish-main
   cancel-in-progress: false # never abort a half-completed push
 
+env:
+  IMAGE: ghcr.io/binhsu/aegis-greeter # GHCR requires a lowercase owner path
+
 jobs:
   publish:
-    if: vars.ECR_REPO_URL != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -68,37 +74,34 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
-        with:
-          role-to-assume: ${{ vars.OIDC_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Log in to Amazon ECR
+      - name: Log in to GHCR
+        # Plain docker login against the built-in GITHUB_TOKEN — no
+        # marketplace action needed, so nothing here needs a SHA pin.
+        # GITHUB_TOKEN is scoped to this repo and expires at job end.
         run: |
-          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
-            | docker login --username AWS --password-stdin "${{ vars.ECR_REGISTRY }}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
 
       - name: Resolve image tag
         # The SHA tag is a human-readable convenience handle in the
         # registry. It is NOT what the deploy repo pins to — promotion is
-        # by digest. The ECR repo is IMMUTABLE, so this tag can never be
-        # repointed at different bytes. See ADR AG-03.
+        # by digest. GHCR tags pushed here are never repointed at
+        # different bytes. See ADR AG-03.
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
       - name: Build and push image (once), capturing the digest
         run: |
           # ONE build. --load makes the bytes available locally for the
-          # Trivy gate below; --push registers the same bytes in the
-          # single shared ECR; --metadata-file emits the registry
-          # manifest digest (containerimage.digest) so the deploy repo can
-          # pin by digest. There is exactly one build and one digest — the
-          # build-once posture. See platform-aws ADR-10.
+          # Trivy gate below; --push registers the same bytes in GHCR;
+          # --metadata-file emits the registry manifest digest
+          # (containerimage.digest) so the deploy repo can pin by digest.
+          # There is exactly one build and one digest — the build-once
+          # posture. See platform-aws ADR-10.
           docker buildx build \
             --platform linux/amd64 \
             --build-arg VERSION="${IMAGE_TAG}" \
             --build-arg COMMIT="${GITHUB_SHA}" \
-            --tag "${{ vars.ECR_REPO_URL }}:${IMAGE_TAG}" \
+            --tag "${IMAGE}:${IMAGE_TAG}" \
             --metadata-file metadata.json \
             --load \
             --push \
@@ -110,32 +113,27 @@ jobs:
         # digest is never written into the deploy repo.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ vars.ECR_REPO_URL }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
           severity: HIGH,CRITICAL
           exit-code: '1'
 
       - name: Resolve image digest
-        # REGISTRY-AUTHORITATIVE: `aws ecr describe-images` by the
-        # immutable just-pushed tag is the only ground truth for what is
-        # pullable. On 2026-06-12 buildx metadata reported sha256:46c383…
-        # while the registry's freshly-pushed tag pointed at sha256:0e6f3e…
-        # (the 46c383 manifest did not exist in the repo — a buildx
-        # provenance/index reporting quirk). That wrong digest flowed into
-        # the deploy-repo PR → pod ErrImagePull NotFound. The fix: describe-
-        # images is PRIMARY; buildx metadata is a cross-check only.
-        env:
-          ECR_REPO_URL: ${{ vars.ECR_REPO_URL }}
+        # REGISTRY-AUTHORITATIVE: `docker buildx imagetools inspect`
+        # against the just-pushed tag is the only ground truth for what is
+        # pullable. On 2026-06-12 (against the old ECR registry) buildx
+        # metadata reported sha256:46c383… while the registry's freshly-
+        # pushed tag pointed at sha256:0e6f3e… (the 46c383 manifest did not
+        # exist in the repo — a buildx provenance/index reporting quirk).
+        # That wrong digest flowed into the deploy-repo PR → pod
+        # ErrImagePull NotFound. The fix carries over unchanged to GHCR:
+        # imagetools inspect is PRIMARY; buildx metadata is a cross-check
+        # only.
         run: |
           set -euo pipefail
           # PRIMARY: ask the registry what digest the just-pushed tag
-          # resolves to. Strip the registry/path prefix to the bare ECR repo
-          # name (everything after the last '/').
-          REPO_NAME="${ECR_REPO_URL##*/}"
-          DIGEST="$(aws ecr describe-images \
-            --region "${{ vars.AWS_REGION }}" \
-            --repository-name "${REPO_NAME}" \
-            --image-ids imageTag="${IMAGE_TAG}" \
-            --query 'imageDetails[0].imageDigest' --output text)"
+          # resolves to.
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
 
           # CROSS-CHECK: read the buildx metadata value and warn if it
           # differs from what the registry just confirmed. The registry wins
@@ -173,12 +171,11 @@ jobs:
           # Pin STAGING to the immutable digest. `kustomize edit set image`
           # writes images[].digest (and clears any newTag) for the
           # `aegis-greeter` entry. The deploy repo carries only the bare
-          # image NAME + the digest — the registry URL is the single
-          # aegis-deployment ECR, injected at ArgoCD sync time as the
-          # `aegis.binhsu.org/ecr-repository` annotation (the deploy repo's
-          # overlays splice it in front of the digest via kustomize
-          # `replacements`), so the account ID never lands in the deploy
-          # repo. kustomize is preinstalled on ubuntu runners (no
+          # image NAME + the digest — the registry URL is spliced in at
+          # ArgoCD sync time via the deploy repo's per-overlay registry
+          # annotation/replacement (now GHCR, not the old ECR account), so
+          # the registry never lands in the deploy repo's kustomization
+          # itself. kustomize is preinstalled on ubuntu runners (no
           # curl|bash, no extra tool install). See platform-aws ADR-10.
           # Prod is promoted separately by a gated PR against
           # k8s/overlays/prod — this workflow never writes prod.
@@ -208,8 +205,7 @@ jobs:
           # required CodeRabbit check/review passes — nothing merges
           # before that gate. Requires "Allow auto-merge" enabled on the
           # deploy repo. The PR body cites the bare image name + digest,
-          # NOT the registry URL — the URL embeds the AWS account ID and
-          # the deploy repo is public.
+          # NOT the registry URL.
           export GH_TOKEN="${INFRA_REPO_PAT}"
           # Re-run for the same source commit: reuse the still-open PR
           # instead of failing on a duplicate create. `.[].number` prints

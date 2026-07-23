@@ -168,18 +168,22 @@ jobs:
             deploy
           cd deploy/k8s/overlays/staging
 
-          # Pin STAGING to the immutable digest. `kustomize edit set image`
-          # writes images[].digest (and clears any newTag) for the
-          # `aegis-greeter` entry. The deploy repo carries only the bare
-          # image NAME + the digest — the registry URL is spliced in at
-          # ArgoCD sync time via the deploy repo's per-overlay registry
-          # annotation/replacement (now GHCR, not the old ECR account), so
-          # the registry never lands in the deploy repo's kustomization
-          # itself. kustomize is preinstalled on ubuntu runners (no
-          # curl|bash, no extra tool install). See platform-aws ADR-10.
+          # Pin STAGING to the immutable digest. The deploy repo commits the
+          # registry statically: `images[].newName: ghcr.io/binhsu/aegis-greeter`
+          # (2026-07-21 GHCR migration, aegis-platform-aws ADR-24) — nothing
+          # splices the registry in at ArgoCD sync time anymore. Passing only
+          # `aegis-greeter@${IMAGE_DIGEST}` to `kustomize edit set image` sets
+          # `name`+`digest` for the `aegis-greeter` entry but WIPES any
+          # existing `newName` on that entry (kustomize replaces the whole
+          # image record, it does not merge fields) — that silently dropped
+          # the GHCR prefix and broke validate.yml's digest-pin guard in the
+          # staging overlay (2026-07 incident). Passing `name=newName@digest`
+          # instead sets `newName`+`digest` together, so the GHCR prefix
+          # survives every bump. kustomize is preinstalled on ubuntu runners
+          # (no curl|bash, no extra tool install). See platform-aws ADR-10.
           # Prod is promoted separately by a gated PR against
           # k8s/overlays/prod — this workflow never writes prod.
-          kustomize edit set image "aegis-greeter@${IMAGE_DIGEST}"
+          kustomize edit set image "aegis-greeter=${IMAGE}@${IMAGE_DIGEST}"
 
           cd "${GITHUB_WORKSPACE}/deploy"
           git config user.name "BinHsu"

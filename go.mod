@@ -10,13 +10,13 @@ require (
 	github.com/rhysd/actionlint v1.7.12
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
-	go.opentelemetry.io/otel v1.43.0
+	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0
-	go.opentelemetry.io/otel/metric v1.43.0
-	go.opentelemetry.io/otel/sdk v1.43.0
-	go.opentelemetry.io/otel/sdk/metric v1.43.0
-	go.opentelemetry.io/otel/trace v1.43.0
+	go.opentelemetry.io/otel/metric v1.45.0
+	go.opentelemetry.io/otel/sdk v1.45.0
+	go.opentelemetry.io/otel/sdk/metric v1.45.0
+	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/vuln v1.3.0
 )
 
@@ -85,7 +85,7 @@ require (
 	github.com/ghostiam/protogetter v0.3.9 // indirect
 	github.com/gitleaks/go-gitdiff v0.9.1 // indirect
 	github.com/go-critic/go-critic v0.12.0 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
@@ -249,7 +249,7 @@ require (
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260421165255-392afab6f40e // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/tools v0.44.0 // indirect

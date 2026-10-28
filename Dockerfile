@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
 # --- Build stage ---
-# Pinned to the multi-arch index digest fetched 2026-07-21 (golang:1.26.5-alpine3.24)
-# — bumped from 1.26.4 to clear GO-2026-5856 (crypto/tls stdlib CVE).
+# Pinned to the multi-arch index digest fetched 2026-10-27 (golang:1.26.10-alpine3.24)
+# — bumped from 1.26.5 to clear GO-2026-6090/6091/6218/5972/6809 (stdlib CVEs).
 # To refresh:
 #   docker buildx imagetools inspect golang:1.26-alpine
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
+FROM golang:1.26-alpine@sha256:27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba AS builder
 
 WORKDIR /src
 
